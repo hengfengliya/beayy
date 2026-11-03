@@ -83,3 +83,57 @@ pub fn shutdown() {
     }
     let _ = rx.recv_timeout(Duration::from_secs(1));
 }
+
+const RUN_KEY: windows::core::PCWSTR = windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+const UNINSTALL_KEY: windows::core::PCWSTR = windows::core::w!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Beayy");
+const RUN_NAME: windows::core::PCWSTR = windows::core::w!("Beayy");
+
+/// 读当前用户注册表里的一个字符串值，没有返回 None
+fn reg_string(key: windows::core::PCWSTR, name: windows::core::PCWSTR) -> Option<String> {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let mut buf = [0u16; 1024];
+    let mut len = (buf.len() * 2) as u32;
+    let err = unsafe { RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr().cast()), Some(&mut len)) };
+    if err.is_err() {
+        return None;
+    }
+    let n = (len as usize / 2).saturating_sub(1);
+    Some(String::from_utf16_lossy(&buf[..n]))
+}
+
+fn set_reg_string(key: windows::core::PCWSTR, name: windows::core::PCWSTR, value: &str) -> Result<(), String> {
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    let wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
+    let err = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key, name, REG_SZ.0, Some(wide.as_ptr().cast()), (wide.len() * 2) as u32) };
+    err.ok().map_err(|e| e.message())
+}
+
+/// 开机自动启动开着没有：当前用户的 Run 里有 Beayy，且指向正在跑的这个 beayy.exe
+pub fn login_item_enabled() -> bool {
+    let (Some(v), Ok(exe)) = (reg_string(RUN_KEY, RUN_NAME), std::env::current_exe()) else { return false };
+    v.trim().trim_matches('"').eq_ignore_ascii_case(&exe.to_string_lossy())
+}
+
+/// 打开或关掉开机自动启动（当前用户的 Run，不要管理员；安装包装完也写这一项）
+pub fn set_login_item(on: bool) -> Result<(), String> {
+    if on {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        set_reg_string(RUN_KEY, RUN_NAME, &format!("\"{}\"", exe.display()))
+    } else {
+        use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+        use windows::Win32::System::Registry::{RegDeleteKeyValueW, HKEY_CURRENT_USER};
+        let err = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME) };
+        if err == ERROR_FILE_NOT_FOUND { Ok(()) } else { err.ok().map_err(|e| e.message()) }
+    }
+}
+
+/// 用安装包装的：自动更新换了 exe 以后，把「应用和功能」里显示的版本跟上
+pub fn sync_installed_version() {
+    if reg_string(UNINSTALL_KEY, windows::core::w!("DisplayName")).is_none() {
+        return;
+    }
+    let v = env!("CARGO_PKG_VERSION");
+    if reg_string(UNINSTALL_KEY, windows::core::w!("DisplayVersion")).as_deref() != Some(v) {
+        let _ = set_reg_string(UNINSTALL_KEY, windows::core::w!("DisplayVersion"), v);
+    }
+}

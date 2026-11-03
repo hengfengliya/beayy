@@ -112,7 +112,9 @@ fn set_paused(paused: bool, minutes: Option<i64>, state: tauri::State<'_, Arc<Ap
 fn login_item() -> bool {
     #[cfg(target_os = "macos")]
     return beayy_capture::macos::login_item_enabled();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return beayy_capture::windows::login_item_enabled();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     return false;
 }
 
@@ -127,7 +129,9 @@ fn quit_app(app: AppHandle) {
 fn set_login_item(on: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return beayy_capture::macos::set_login_item(on);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return beayy_capture::windows::set_login_item(on);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     return if on { Err("这个系统上还不支持".into()) } else { Ok(()) };
 }
 
@@ -238,7 +242,14 @@ fn single_instance() -> Result<Option<std::fs::File>, ()> {
     for _ in 0..40 {
         match f.try_lock() {
             Ok(()) => return Ok(Some(f)),
-            Err(std::fs::TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(250)),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                // Windows 上点快捷方式（带 --open）时已经有一个在跑（比如开机自启的）：留个请求，让它打开主窗口
+                #[cfg(target_os = "windows")]
+                if std::env::args().any(|a| a == "--open") {
+                    let _ = std::fs::write(root.join("open.request"), "");
+                }
+                std::thread::sleep(Duration::from_millis(250))
+            }
             Err(_) => return Ok(None),
         }
     }
@@ -476,10 +487,7 @@ fn main() {
             let phone = MenuItem::with_id(app, "phone", "iPhone：读取中", false, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "暂停记录", true, None::<&str>)?;
             let data = MenuItem::with_id(app, "data", "打开数据目录", true, None::<&str>)?;
-            #[cfg(target_os = "macos")]
-            let login = CheckMenuItem::with_id(app, "login", "开机自动启动", true, beayy_capture::macos::login_item_enabled(), None::<&str>)?;
-            #[cfg(not(target_os = "macos"))]
-            let login = CheckMenuItem::with_id(app, "login", "开机自动启动", false, false, None::<&str>)?;
+            let login = CheckMenuItem::with_id(app, "login", "开机自动启动", cfg!(any(target_os = "macos", target_os = "windows")), login_item(), None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
@@ -513,10 +521,8 @@ fn main() {
                             apply_paused(&s, p);
                         }
                     }
-                    #[cfg(target_os = "macos")]
                     "login" => {
-                        let on = !beayy_capture::macos::login_item_enabled();
-                        if let Err(err) = beayy_capture::macos::set_login_item(on) {
+                        if let Err(err) = set_login_item(!login_item()) {
                             if let Some(s) = app.try_state::<Arc<AppState>>() {
                                 s.log.write("login_item.error", fields! {"error" => err}, None);
                             }
@@ -587,8 +593,7 @@ fn main() {
                     }
                     let paused = st.paused.load(Ordering::Relaxed);
                     let _ = pause.set_text(if paused { "继续记录" } else { "暂停记录" });
-                    #[cfg(target_os = "macos")]
-                    let _ = login.set_checked(beayy_capture::macos::login_item_enabled());
+                    let _ = login.set_checked(login_item());
                     if let Some(tray) = handle.tray_by_id("main") {
                         let _ = tray.set_title(if tray_ok() { None } else { Some("!") });
                     }
@@ -596,6 +601,20 @@ fn main() {
                 }
             });
             // 并跑版另开自检钩子（见 devhook.rs）
+            // Windows 没有 Reopen：另一个进程留下 open.request（见 single_instance）就打开主窗口
+            #[cfg(target_os = "windows")]
+            {
+                let req = data_root().join("open.request");
+                let _ = std::fs::remove_file(&req);
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if std::fs::remove_file(&req).is_ok() {
+                        let h = handle.clone();
+                        let _ = handle.run_on_main_thread(move || open_main(&h));
+                    }
+                });
+            }
             // 带 --open 启动、或还没做过首次引导：直接打开主窗口
             if std::env::args().any(|a| a == "--open") || data::needs_onboarding() {
                 open_main(app.handle());

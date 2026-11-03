@@ -95,7 +95,7 @@ Claude 桌面版、Cursor 的配置在「设置 → 连接 → 接到 AI 里」�
 
 ## 安装
 
-到 [Releases](https://github.com/hengfengliya/beayy/releases/latest) 下载 `Beayy-<版本>.dmg`（Windows 是 `Beayy-<版本>-windows-x64.zip`），拖进「应用程序」打开。第一次打开会带你走一遍：授权（辅助功能、输入监控、可选的完全磁盘访问）、填模型、要不要同步。装好以后会自动检查更新，新版本下好后弹窗提示，点「重启更新」几秒就换好。
+到 [Releases](https://github.com/hengfengliya/beayy/releases/latest) 下载 `Beayy-<版本>.dmg`，拖进「应用程序」打开；Windows 下载 `Beayy-<版本>-windows-x64-setup.exe` 安装，会建桌面和开始菜单快捷方式、开机自动启动。第一次打开会带你走一遍：授权（辅助功能、输入监控、可选的完全磁盘访问）、填模型、要不要同步。装好以后会自动检查更新，新版本下好后弹窗提示，点「重启更新」几秒就换好。
 
 界面有简体中文和英文：设置 → 通用 → 语言，默认跟随系统。
 

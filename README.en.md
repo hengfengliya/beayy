@@ -94,7 +94,7 @@ Either way, records are compressed and encrypted on your device before they leav
 
 ## Install
 
-Download `Beayy-<version>.dmg` from [Releases](https://github.com/hengfengliya/beayy/releases/latest) (`Beayy-<version>-windows-x64.zip` on Windows) and drag it into Applications. The first launch walks you through permissions (Accessibility, Input Monitoring, optionally Full Disk Access), the model, and whether to sync. Beayy checks for updates on its own; once a new version is downloaded it asks you, and "Restart to update" takes a few seconds.
+Download `Beayy-<version>.dmg` from [Releases](https://github.com/hengfengliya/beayy/releases/latest) and drag it into Applications. On Windows, run `Beayy-<version>-windows-x64-setup.exe`: it adds desktop and Start menu shortcuts and starts Beayy at login. The first launch walks you through permissions (Accessibility, Input Monitoring, optionally Full Disk Access), the model, and whether to sync. Beayy checks for updates on its own; once a new version is downloaded it asks you, and "Restart to update" takes a few seconds.
 
 The iPhone and Apple Watch apps are in public TestFlight: https://testflight.apple.com/join/Ptzqu4q8 (source in [`ios/`](ios/)).
 
