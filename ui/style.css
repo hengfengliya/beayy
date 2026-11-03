@@ -661,6 +661,7 @@ a.mx-btn { text-decoration: none; }
   .strip-axis span.t small { display: none; } /* 窄屏只写小时，免得挤在一起 */
   .mx-setting { flex-wrap: wrap; }
   .mx-setting .btns { flex-wrap: wrap; }
+  .mx-setting:has(#roast) .mx-setting-main { flex-basis: 100%; }  /* 棒喝六档太宽，放下一行，免得说明挤成一字一行 */
   .mx-dialog { width: calc(100vw - 24px) !important; max-width: none; }
 }
 

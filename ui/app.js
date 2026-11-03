@@ -2190,6 +2190,7 @@ const THEMES = [["", tr("跟随系统")], ["light", tr("浅色")], ["dark", tr("
 const LANGS = [["", tr("跟随系统")], ["zh", "简体中文"], ["en", "English"]];
 /** AI 总结的语言（settings.json 的 summary_language）：空＝跟随界面语言（界面语言只在本机 localStorage，启动时报给后台存成 ui_lang） */
 const SUM_LANGS = [["", tr("跟随界面")], ["zh", "简体中文"], ["en", "English"]];
+const ROASTS = ["off", "low", "medium", "high", "max", "ultra"].map((k) => [k, k]);
 
 // ---------- 字体（设置 → 通用）：默认用系统的，也可以换成这台电脑上装的任意字体；只存本机（index.html 的 FONTS） ----------
 
@@ -2645,7 +2646,7 @@ async function renderSettings() {
         + setRow(tr("主题"), "", `<div class="mx-seg" role="tablist" id="theme">${THEMES.map(([k, v]) => `<button role="tab" aria-selected="${k === theme}" class="${k === theme ? "is-on" : ""}" data-theme="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("语言"), "", `<div class="mx-seg" role="tablist" id="lang">${LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === langPref}" class="${k === langPref ? "is-on" : ""}" data-lang="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("AI 总结的语言"), tr("10 分钟摘要、日总结、周总结、月总结用哪种语言写"), `<div class="mx-seg" role="tablist" id="sum-lang">${SUM_LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.summary_language || "")}" class="${k === (cf.summary_language || "") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
-        + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，带脏字"), `<button class="mx-switch" role="switch" id="roast" aria-checked="${!!cf.roast}" aria-label="${tr("棒喝")}"></button>`)
+        + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), `<div class="mx-seg" role="tablist" id="roast">${ROASTS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.roast || "off")}" class="${k === (cf.roast || "off") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
         + (mobile ? "" : setRow(tr("字体"), fontDesc(), smallBtn("font-edit", tr("更改")))))
       + (mobile ? section(tr("关于"), setRow(tr("版本 {v}", { v: esc(st.version || "") }), tr("手机版跟着 TestFlight 更新"), "")) : aboutSection());
   } else if (tab === "account") {
@@ -2723,7 +2724,10 @@ async function renderSettings() {
     };
     on("login", async () => { try { await call("set_login_item", { on: !st.login_item }); } catch (x) { alert(tr("没改成：{err}", { err: x })); } renderSettings(); });
     on("font-edit", () => fontDialog(renderSettings));
-    on("roast", async () => { await saveSome({ roast: !cf.roast }); renderSettings(); });
+    document.getElementById("roast").onclick = async (e) => {
+      const b = e.target.closest("[data-v]"); if (!b) return;
+      await saveSome({ roast: b.dataset.v }); renderSettings();
+    };
     document.getElementById("sum-lang").onclick = async (e) => {
       const b = e.target.closest("[data-v]"); if (!b) return;
       await saveSome({ summary_language: b.dataset.v }); renderSettings();

@@ -781,6 +781,11 @@ impl Summarizer {
         self.chat(kind, system, user).map(|x| x.0)
     }
 
+    /// 要一段文字回来（不套 JSON），温度自己定：棒喝用，温度低了天天一个样，温度一高模型又常忘了套 JSON
+    pub fn ask_text(&self, kind: &str, system: &str, user: &str, temperature: f64) -> Result<String, String> {
+        self.chat_t(kind, system, user, temperature, false).map(|x| x.0["text"].as_str().unwrap_or("").to_string())
+    }
+
     /// 记一次模型用量：logs/llm_usage.jsonl 一行 {at, kind, model, official, in, out}
     fn note_usage(&self, kind: &str, model: &str, usage: &Value) {
         let n = |k: &str| usage.get(k).and_then(Value::as_i64).unwrap_or(0);
@@ -796,6 +801,11 @@ impl Summarizer {
 
     /// 调网关，要一个 JSON 对象回来；返回（对象，用量）。kind 是这次干什么用的，记用量用
     fn chat(&self, kind: &str, system: &str, user: &str) -> Result<(Map<String, Value>, Value), String> {
+        self.chat_t(kind, system, user, 0.3, true)
+    }
+
+    /// json＝false 时不解析，原文放在 {"text": …} 里回来
+    fn chat_t(&self, kind: &str, system: &str, user: &str, temperature: f64, json: bool) -> Result<(Map<String, Value>, Value), String> {
         let (gateway, model) = self.settings();
         // 官方：地址是同步服务的代理，认证用账号令牌（模型由服务器定）；自己的网关：地址、模型、密钥都用设置里的
         let (url, auth) = if self.official() {
@@ -812,7 +822,7 @@ impl Summarizer {
         } else {
             system.to_string()
         };
-        let body = json!({"model": model, "temperature": 0.3, "messages": [
+        let body = json!({"model": model, "temperature": temperature, "messages": [
             {"role": "system", "content": system}, {"role": "user", "content": user}]});
         let agent: ureq::Agent = beayy_sync::http_agent(ureq::Agent::config_builder()
             .proxy(None)
@@ -847,6 +857,13 @@ impl Summarizer {
                     self.note_usage(kind, v["model"].as_str().unwrap_or(&model), &usage);
                     let text = v["choices"][0]["message"]["content"].as_str().unwrap_or("").trim().to_string();
                     let text = fence.replace_all(&text, "").to_string();
+                    if !json {
+                        if text.is_empty() {
+                            err = "模型什么都没返回".into();
+                            continue;
+                        }
+                        return Ok((Map::from_iter([("text".to_string(), Value::String(text))]), usage));
+                    }
                     let (Some(a), Some(b)) = (text.find('{'), text.rfind('}')) else {
                         err = format!("模型没返回 JSON：{}", cut(&text, 200));
                         continue;

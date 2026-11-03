@@ -1455,8 +1455,12 @@ pub fn get_settings() -> Value {
         // AI 总结的语言：zh／en，空＝跟随界面语言（ui_lang 是界面启动时报的）
         "summary_language": get("summary_language", ""),
         "ui_lang": get("ui_lang", ""),
-        // 棒喝：日总结、周总结多写一段狠话（带脏字），默认关
-        "roast": s.get("roast").and_then(Value::as_bool).unwrap_or(false),
+        // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
+        "roast": match s.get("roast") {
+            Some(Value::Bool(true)) => "medium",
+            Some(Value::String(k)) if ["low", "medium", "high", "max", "ultra"].contains(&k.as_str()) => k.as_str(),
+            _ => "off",
+        },
     })
 }
 

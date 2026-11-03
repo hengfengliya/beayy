@@ -292,6 +292,16 @@ fn main() {
         }
         return;
     }
+    if args.get(1).map(|a| a == "--roast").unwrap_or(false) {
+        // 调试用：按某个力度（low／medium／high／max／ultra，默认设置里的）写某天的棒喝（后面加 week 写那一周的）并打印，不写文件
+        let d = args.get(2).and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()).unwrap_or_else(|| chrono::Local::now().date_naive());
+        let level = args.get(3).map(String::as_str).filter(|a| *a != "week");
+        match daily::roast_preview(d, level, args.iter().any(|a| a == "week")) {
+            Ok(r) => println!("{r}"),
+            Err(e) => eprintln!("{e}"),
+        }
+        return;
+    }
     if args.get(1).map(|a| a == "--monthly").unwrap_or(false) {
         // 调试用：写某天所在那个月的月总结（默认上个月）并打印
         let d = args.get(2).and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()).unwrap_or_else(|| daily::first_of(chrono::Local::now().date_naive()) - chrono::Duration::days(1));

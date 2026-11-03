@@ -220,64 +220,255 @@ const PROMPT: &str = "你是用户的日记助手。下面是用户今天的记�
 材料最后如果列了「前后几天的点评已经引过」，quote 换一句：别出自同一篇、同一个人，意思也别相近；那几句如果多是中国古诗文，这次换个门类（现当代文学、外国文学、电影、名人语录等）。
 ";
 
-// 棒喝（设置里打开才写）：单独问一次模型，换成贴吧老哥的人设，免得和日记助手「不刻薄」的口吻打架。
-// 去 AI 味的几条取自 fl-deslop；哲理要从当天的事里说破，不引名言（名言归点评）
-const ROAST_HOW: &str = "怎么骂：
-- 贴吧老哥的口吻：叫他「老哥」，阴阳怪气、反问、夸张的比喻，先嘲讽再补刀。贴吧梗每段 1–2 个（绷不住了、好家伙、乐、急了、就这、赢麻了、属实、蚌埠住了、6、典这类），用对场合，别堆，别每次都用同一个。
-- 口语，短句，一句一刀。带脏字（他妈、操、卧槽、扯淡、狗屁、傻逼这类），全段至少 3 处，骂到点上用，别句句带。
-- 每一刀都落在材料里的具体事上：几点、几分钟、哪个 app、哪个项目、哪条规矩。只写材料里有的，不编；材料说了不准、不全的数不拿来骂。
-- 最狠的一刀拿他自己打他：他定的规矩、说要做没做的事、他在做的东西（比如他做的产品本身就是管时间、管专注、管待办的，他自己却管不住）、他擅长的本事，跟实际干的摆在一起，让反差自己说话。
-- 哲理藏在骂里：挑最该骂的一件，说破他为什么会这样，在躲什么、拿什么换了什么、哪件事是因为有人催才先做的。直接说他在干什么（「你在拿……换……」「你怕的是……」），大白话一句说透，具体到这些事，这一句不用梗；不引名言，不讲人人都懂的道理，不熬鸡汤。
-- 骂行为，不骂人格；不碰外貌、身体、健康、家人、伴侣和其他人。干得好的地方照实认一句就过，别夸。
-- 不先否定一个说法再给结论。❌「你不是没本事，是怕交卷」 ✅「你怕交卷」；❌「这不是并行推进，是每件事都摸一下」 ✅「你每件事都摸一下，好让自己觉得全在动」。「不是……是……」「不是……而是……」「与其说……不如说」一律不写。
-- 不说「这点我认」「我承认」这种裁判腔；不三连排比；不用破折号；不加「说白了」「一句话」「记住」这类报幕。
-- 最后一句是一刀，最好就是说破的那句，骂完就停：不给建议，不写「明天先……」「别再……」，不升华、不鼓励。
-- 写完自己查一遍上面几条，犯了就改掉再交。
-";
-
+// 棒喝（设置里选了力度才写）：单独问一次模型，换成贴吧老哥的人设，免得和日记助手「不刻薄」的口吻打架。
+// 去 AI 味的几条取自 fl-deslop；哲理要从当天的事里说破，不引名言（名言归点评）。
+// 不给示范句：给了模型就天天照抄（11-01 到 11-03 四段全是「你拿……换……」「你怕……」）；提示词守不住的几条交给 roast_faults 查
 const ROAST: &str = "你是在贴吧混了很多年的老哥，跟用户认识很久，嘴毒，说话不留情面。用户自己要你每天给他来一下棒喝，一棒打醒。下面是他今天的记录：电脑和手机的时长、时间花在哪些领域和项目、每小时在做什么、他自己定的规矩今天守没守住，有的话还有去了哪、对话（录音转写）和健康。
-读完骂他，骂得狠、骂得准，骂完让他心里一沉、想改。材料最后如果列了「前几天骂过」，换个角度骂，那几段用过的梗这次别再用；同一个毛病连着几天还在犯，点明第几天了，骂得更重。
-只返回一个 JSON 对象，不要代码块：{\"roast\": \"……\"}。roast 是 150–250 字的一段话，中文，对他用「你」。
+读完骂他，骂得准，骂完让他心里一沉、想改。
 ";
 
 const WEEK_ROAST: &str = "你是在贴吧混了很多年的老哥，跟用户认识很久，嘴毒，说话不留情面。用户自己要你每周给他来一下棒喝，一棒打醒。下面是他这一周每天的日总结（有的天可能没有，里面的「棒喝」是你每天骂过的）。
 骂这一周的模式：哪个毛病天天犯、哪件事说了一周没动、哪天最离谱、时间实际给了谁。每天骂过的别照抄，往上提一层，骂那个让这些天反复出事的根子。
-只返回一个 JSON 对象，不要代码块：{\"roast\": \"……\"}。roast 是 250–400 字，一两段话，中文，对他用「你」；脏字全段至少 4 处。
 ";
 
-/// 写棒喝（日总结、周总结共用）；出错只是少这一段，总结照写。脏字不够、写了「不是……是……」的，指出来让它重写一次
-fn roast_of(sm: &beayy_summary::Summarizer, kind: &str, system: &str, user: &str, min_curse: usize) -> Option<String> {
-    let system = format!("{system}{ROAST_HOW}");
-    let ask = |u: &str| -> Option<String> {
-        let j = sm.ask_as(kind, &system, u).map_err(|e| eprintln!("棒喝没写成：{e}")).ok()?;
-        j.get("roast").and_then(Value::as_str).map(|r| r.trim().to_string()).filter(|r| !r.is_empty())
-    };
-    let first = ask(user)?;
-    let faults = roast_faults(&first, min_curse);
-    if faults.is_empty() {
-        return Some(first);
-    }
-    Some(ask(&format!("{user}\n\n你上一版：{first}\n上一版的毛病：{}。照「怎么骂」重写。", faults.join("；"))).unwrap_or(first))
+const ROAST_HOW: &str = "怎么骂：
+- 贴吧老哥的口吻：阴阳怪气、反问、夸张的比喻，先嘲讽再补刀。口语，短句，一句一刀。梗从这些里挑，用对场合，别堆：绷不住了、难绷、好家伙、乐、急了、就这、赢麻了、属实、蚌埠住了、典、6、破防了、差不多得了、何意味、包的、润了。
+- 开头从一个画面、一句反问或他干的一件事切进去；不用「老哥」开头，不用数字开头。数字最多 {nums} 个，挑最扎心的，别报流水账。
+- 只写材料里有的，不编，不自己算新数；材料说了不准、不全的数不拿来骂。每一句都拴在材料里一件具体的事上，不准空骂。
+- 不引名言，不讲人人都懂的道理，不熬鸡汤。
+- 不碰外貌、身体、健康、家人、伴侣（约会、订婚、礼物这类和伴侣有关的事也不拿来骂）和其他人，不问候他家里人；不带地域、性别、残障这类歧视的词。
+- 不先否定一个说法再给结论：「不是……是……」「不是……而是……」「与其说……不如说」一律不写，直接写结论。❌「你不是被待办追着跑，你是在给待办续命」 ✅「你在给待办续命」
+- 不说「这点我认」「我承认」这种裁判腔；不三连排比；不用破折号；不加「说白了」「一句话」「记住」这类报幕。
+- 最后一句是一刀，骂完就停：不给建议，不写「明天先……」「别再……」，不升华、不鼓励。
+- 材料最后列了之前骂过的几段：那几段用过的梗、开头、比喻、说破的那句，这次都换掉；说破过的原因这次不再说，同一个毛病还在犯，只点一句第几天了。
+- 写完自己查一遍上面几条，犯了就改掉再交。
+";
+
+/// 棒喝的力度：设置里的值（low／medium／high／max／ultra）、怎么骂、日和周的字数、日和周的脏字至少几处、最多几处、轮不轮刀法。
+/// 越往上越狠、越不讲理：low 到 high 都有一句说破（深浅不同），max 道理最多一句，ultra 是「贴吧嘴臭老哥」：不讲逻辑和道理，直接情绪输出。
+/// 脏字门槛按 GPT 实测够得着的定（max、ultra 都停在 4–5 处），定高了每次都白白重写一遍
+
+struct Level {
+    key: &'static str,
+    how: &'static str,
+    len: (&'static str, &'static str),
+    curse: (usize, usize),
+    max_curse: Option<usize>,
+    knife: bool,
 }
 
-/// 棒喝的硬毛病：脏字少于 min 处、有先否定再给结论的句子
-fn roast_faults(r: &str, min: usize) -> Vec<String> {
-    let mut out = vec![];
-    let n: usize = ["他妈", "操", "卧槽", "扯淡", "狗屁", "傻逼", "妈的", "屁"].iter().map(|w| r.matches(w).count()).sum::<usize>()
-        - r.matches("他妈").count().min(r.matches("妈的").count()) // 「他妈的」别算两处
-        - r.matches("狗屁").count(); // 「狗屁」里的「屁」别再算一处
-    if n < min {
-        out.push(format!("脏字只有 {n} 处，至少要 {min} 处"));
+static LEVELS: [Level; 5] = [
+    Level {
+        key: "low",
+        how: "力度：low。像熟人饭桌上损他，笑着扎一下：调侃、阴阳怪气、反问。一个脏字都不带。梗最多 1 个。干得好的事可以认一句。挑最该说的一件往深里说，其他事最多顺带一句；有一句用大白话点破他在干什么，具体到这件事，不挖他为什么。",
+        len: ("100–180", "200–300"),
+        curse: (0, 0),
+        max_curse: Some(0),
+        knife: true,
+    },
+    Level {
+        key: "medium",
+        how: "力度：medium。贴吧老哥骂醒他，阴阳怪气加真骂。脏字长在句子里（这他妈、什么狗屁、卧槽这样），别在句尾单独补一个「操」。梗 1–2 个。不夸，干得好的一笔带过。挑最该骂的一件往深里骂，其他事最多顺带一句；有一句用大白话说破他为什么会这样，具体到这件事，这一句不用梗。",
+        len: ("150–250", "250–400"),
+        curse: (2, 3),
+        max_curse: None,
+        knife: true,
+    },
+    Level {
+        key: "high",
+        how: "力度：high。往死里喷，一句不饶：一句认可都没有，句句带刺，梗 2 个；骂人可以，但每一句都拴在具体的事上。之前骂过的还在犯，把天数摆出来翻旧账。挑最该骂的一件往深里骂；有一句戳穿他拿来骗自己的那套说法。最后一句是最重的一刀。",
+        len: ("200–300", "300–450"),
+        curse: (3, 4),
+        max_curse: None,
+        knife: true,
+    },
+    Level {
+        key: "max",
+        how: "力度：max。贴吧嘴臭老哥上线：脏字密到几乎句句都有，阴阳怪气、反问、夸张比喻轮番上，梗 2–3 个。逮着今天最气人的两三件事轮番喷，之前骂过的还在犯就翻旧账带天数。道理最多一句，一句话戳穿就回去接着骂，别分析。",
+        len: ("200–300", "300–450"),
+        curse: (4, 5),
+        max_curse: None,
+        knife: false,
+    },
+    Level {
+        key: "ultra",
+        how: "力度：ultra。你现在就是贴吧嘴臭老哥，嘴臭拉满：不讲逻辑，不讲道理，不分析原因，不说破，直接情绪输出，像在帖子里破防对线，一句比一句冲。短句、感叹、反问、复读，对线的话随便甩（？？？、你搁这……呢、好好好、我真服了、笑死、就这、急了急了、乐子人），梗随便用。句句带脏字。骂的还是材料里他今天干的具体事，别空骂。",
+        len: ("150–250", "250–400"),
+        curse: (5, 6),
+        max_curse: None,
+        knife: false,
+    },
+];
+
+/// 刀法：日棒喝每天的主刀换一种，按日期轮（账本要有前几天的棒喝、原话要有录音转写才轮得到）
+const KNIVES: [(&str, &str); 5] = [
+    ("画面", "挑今天一个具体时刻（几点、在哪个 app、在干什么），放大成一个画面骂"),
+    ("反差", "拿他自己打他：他做的东西、定的规矩、说过要做的事，跟今天实际干的摆在一起（比如他做的产品要是管时间、管待办的，他自己却管不住），让反差自己说话"),
+    ("代价", "算账：今天的时间实际给了谁、换来了什么、什么被挤掉了"),
+    ("账本", "翻前几天骂过的具体事：今天材料里看得出办了没有，没办的点名拖了第几天；看不出来的不提"),
+    ("原话", "拿录音转写里他自己说的话打他"),
+];
+
+/// 设置里棒喝的力度；没开是 None（0.2.46 存的 true 算 medium）
+fn roast_level() -> Option<&'static Level> {
+    let s = crate::data::read_settings_raw();
+    let key = match s.get("roast") {
+        Some(Value::Bool(true)) => "medium",
+        Some(Value::String(k)) => k.as_str(),
+        _ => "",
+    };
+    LEVELS.iter().find(|l| l.key == key)
+}
+
+/// 输出格式那一行：字数、脏字
+fn roast_format(lv: &Level, len: &str, curse: usize) -> String {
+    let c = if lv.max_curse == Some(0) { "一个脏字都不带".to_string() } else { format!("脏字（他妈的、操、卧槽、扯淡、狗屁、傻逼、妈的这类）全段至少 {curse} 处，分散在不同的句子里，少一处都不行") };
+    format!("只写这一段话本身，不要 JSON、标题、引号：{len} 字，中文，对他用「你」；{c}。\n")
+}
+
+/// 某天的棒喝：前三天的棒喝一起给它，免得重样；主刀按日期轮
+fn roast_day(sm: &beayy_summary::Summarizer, date: NaiveDate, material: &str, lv: &Level) -> Option<String> {
+    let before: Vec<(NaiveDate, String)> = (1..=3i64).rev()
+        .map(|k| date - Duration::days(k))
+        .filter_map(|d| fs::read_to_string(path_of(d)).ok().and_then(|t| section_of(&t, "棒喝")).map(|r| (d, r)))
+        .collect();
+    let knives: Vec<&(&str, &str)> = KNIVES.iter()
+        .filter(|(k, _)| match *k { "账本" => !before.is_empty(), "原话" => material.contains("录音转写"), _ => true })
+        .collect();
+    let &(name, how) = knives[date.ordinal0() as usize % knives.len()];
+    // max、ultra 不讲道理，不给刀法，逮着最气人的喷
+    let knife = if lv.knife { format!("今天主刀用「{name}」：{how}。材料撑不起就换一种，别硬凑。\n") } else { String::new() };
+    let system = format!("{ROAST}{}\n{knife}{}{}", lv.how, ROAST_HOW.replace("{nums}", "3"), roast_format(lv, lv.len.0, lv.curse.0));
+    let used = if before.is_empty() { String::new() } else { format!("\n前几天骂过：\n{}\n", before.iter().map(|(d, r)| format!("- {}：{r}", d.format("%m-%d"))).collect::<Vec<_>>().join("\n")) };
+    let prev: Vec<String> = before.into_iter().map(|x| x.1).collect();
+    let zh = sm.out_lang() == "zh";
+    roast_of(sm, "daily", &system, &format!("{material}{used}"), |r| roast_faults(r, lv, lv.curse.0, 3, &prev, material, zh)).map(|r| if zh { unnegate(&r) } else { r })
+}
+
+/// 某周的棒喝：上周的棒喝一起给它，免得重样
+fn roast_week(sm: &beayy_summary::Summarizer, monday: NaiveDate, material: &str, lv: &Level) -> Option<String> {
+    let before = fs::read_to_string(week_path(monday - Duration::days(7))).ok().and_then(|t| section_of(&t, "棒喝"));
+    let system = format!("{WEEK_ROAST}{}\n{}{}", lv.how, ROAST_HOW.replace("{nums}", "5"), roast_format(lv, lv.len.1, lv.curse.1));
+    let used = before.as_ref().map(|r| format!("\n上周骂过：\n- {r}\n")).unwrap_or_default();
+    let prev: Vec<String> = before.into_iter().collect();
+    let zh = sm.out_lang() == "zh";
+    roast_of(sm, "weekly", &system, &format!("{material}{used}"), |r| roast_faults(r, lv, lv.curse.1, 5, &prev, material, zh)).map(|r| if zh { unnegate(&r) } else { r })
+}
+
+/// 重写过还剩的「不是 A，是 B」：删掉前半句只留结论（「你不是被待办追着跑，你是在给待办续命」→「你是在给待办续命」）
+fn unnegate(r: &str) -> String {
+    NEGATE.replace_all(r, "是").to_string()
+}
+
+/// 问模型写棒喝（要的是一段文字，温度高一点，免得天天一个样）；出错只是少这一段，总结照写。有硬毛病的指出来让它重写一次，两版里挑毛病少的
+fn roast_of(sm: &beayy_summary::Summarizer, kind: &str, system: &str, user: &str, faults: impl Fn(&str) -> Vec<String>) -> Option<String> {
+    let ask = |u: &str| -> Option<String> {
+        let t = sm.ask_text(kind, system, u, 0.8).map_err(|e| eprintln!("棒喝没写成：{e}")).ok()?;
+        // 偶尔还是套了 JSON 或一对引号：剥掉
+        let t = serde_json::from_str::<Value>(&t).ok().and_then(|j| j["roast"].as_str().map(String::from)).unwrap_or(t);
+        let t = t.trim();
+        let t = [('"', '"'), ('“', '”')].iter().find_map(|(a, b)| t.strip_prefix(*a).and_then(|x| x.strip_suffix(*b))).unwrap_or(t).trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+    let first = ask(user)?;
+    let f1 = faults(&first);
+    if f1.is_empty() {
+        return Some(first);
     }
-    if let Some(m) = Regex::new(r"不是[^。！？；]{0,24}?[，,；;]\s*(而|就|你)?是").unwrap().find(r) {
+    eprintln!("棒喝第一版的毛病：{}", f1.join("；"));
+    let Some(second) = ask(&format!("{user}\n\n你上一版：{first}\n上一版的毛病：{}。照「怎么骂」重写。", f1.join("；"))) else {
+        return Some(first);
+    };
+    let f2 = faults(&second);
+    if !f2.is_empty() {
+        eprintln!("棒喝第二版的毛病：{}", f2.join("；"));
+    }
+    Some(if f2.len() <= f1.len() { second } else { first })
+}
+
+/// 先否定再给结论：「不是……，是……」「不是……，而是……」
+static NEGATE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"不是[^。！？；]{0,24}?[，,；;]\s*(而|就|你)?是").unwrap());
+
+/// 棒喝的硬毛病（提示词守不住的几条）：数字太多或材料里没有；中文的还查脏字不合力度、句尾补的「操」、先否定再给结论、梗和开头跟之前重样、破折号、结尾给建议
+fn roast_faults(r: &str, lv: &Level, min_curse: usize, max_nums: usize, before: &[String], material: &str, zh: bool) -> Vec<String> {
+    let mut out = vec![];
+    // 数字太多就成了报表；两位以上的数材料里得有（时长、次数、钟点都是从材料里抄的）
+    let nums: Vec<&str> = Regex::new(r"\d+(?:[.:]\d+)?").unwrap().find_iter(r).map(|m| m.as_str()).collect();
+    if nums.len() > max_nums {
+        out.push(format!("数字有 {} 个，最多 {max_nums} 个", nums.len()));
+    }
+    let made: Vec<&str> = nums.iter().copied()
+        .filter(|x| x.len() >= 2 && !Regex::new(&format!(r"(^|[^\d.]){}($|[^\d])", regex::escape(x))).unwrap().is_match(material))
+        .collect();
+    if !made.is_empty() {
+        out.push(format!("「{}」材料里没有，别编、别自己算", made.join("」「")));
+    }
+    if !zh {
+        return out;
+    }
+    // 脏字：「他妈的」「狗屁」别算两处，「操作」「操心」这些不算，句尾单独补的「，操。」不算
+    let c = |w: &str| r.matches(w).count();
+    let tacked = Regex::new(r"[，,]\s*操[。！!]").unwrap().find_iter(r).count();
+    let n = ["他妈", "操", "卧槽", "扯淡", "狗屁", "傻逼", "妈的", "屁", "他娘", "狗东西", "SB"].iter().map(|w| c(w)).sum::<usize>()
+        .saturating_sub(c("他妈").min(c("妈的")) + c("狗屁") + ["操作", "操心", "体操", "节操", "情操", "操场", "操盘"].iter().map(|w| c(w)).sum::<usize>() + tacked);
+    if tacked > 0 {
+        out.push("句尾单独补了一个「操」，脏字要长在句子里".into());
+    }
+    match lv.max_curse {
+        Some(m) if n > m => out.push(format!("这一档不带脏字，写了 {n} 处")),
+        _ if n < min_curse => out.push(format!("脏字只有 {n} 处，至少要 {min_curse} 处")),
+        _ => {}
+    }
+    if let Some(m) = NEGATE.find(r) {
         out.push(format!("「{}」是先否定再给结论，直接说结论", m.as_str()));
+    }
+    let memes: Vec<&str> = ["绷不住", "难绷", "好家伙", "赢麻", "蚌埠住", "典中典", "破防", "差不多得了", "何意味", "润了", "急了"]
+        .into_iter()
+        .filter(|m| r.contains(m) && before.iter().any(|b| b.contains(m)))
+        .collect();
+    if !memes.is_empty() {
+        out.push(format!("「{}」之前用过了，换一个", memes.join("」「")));
+    }
+    // 说破的那句也别天天一个句式（之前四段全是「你怕……」「你在拿……换……」）
+    let says: Vec<&str> = ["你怕", "怕的是", "你在拿", "你拿", "你在躲", "躲开"]
+        .into_iter()
+        .filter(|m| r.contains(m) && before.iter().any(|b| b.contains(m)))
+        .collect();
+    if !says.is_empty() {
+        out.push(format!("说破那句又是「{}」，之前用过，换个角度说破", says.join("」「")));
+    }
+    let head = |t: &str| t.chars().take(4).collect::<String>();
+    if r.starts_with("老哥") {
+        out.push("别用「老哥」开头".into());
+    } else if r.starts_with(|ch: char| ch.is_ascii_digit()) {
+        out.push("别用数字开头".into());
+    } else if before.iter().any(|b| head(b) == head(r)) {
+        out.push("开头跟之前一样".into());
+    }
+    if r.contains("——") {
+        out.push("用了破折号".into());
+    }
+    let last = r.trim_end_matches(|ch: char| "。！？!?…".contains(ch)).rsplit(|ch: char| "。！？!?".contains(ch)).next().unwrap_or("");
+    if ["明天", "别再", "记得", "建议", "试试", "赶紧"].iter().any(|w| last.contains(w)) {
+        out.push(format!("最后一句「{last}」在给建议，骂完就停"));
     }
     out
 }
 
-/// 棒喝开着没有（settings.json 的 roast）
-fn roast_on() -> bool {
-    crate::data::read_settings_raw().get("roast").and_then(Value::as_bool).unwrap_or(false)
+/// 命令行 --roast：按某个力度写某天（或那一周）的棒喝，只打印、不写文件；调提示词用
+pub fn roast_preview(date: NaiveDate, level: Option<&str>, week: bool) -> Result<String, String> {
+    let lv = match level {
+        Some(k) => LEVELS.iter().find(|l| l.key == k).ok_or("力度写 low、medium、high、max 或 ultra")?,
+        None => roast_level().ok_or("设置里棒喝是关的")?,
+    };
+    let sm = beayy_summary::Summarizer::new(default_root());
+    let r = if week {
+        let m = monday_of(date);
+        roast_week(&sm, m, &week_input(m)?.1, lv)
+    } else {
+        roast_day(&sm, date, &day_input(date)?.user, lv)
+    };
+    r.ok_or_else(|| "棒喝没写成".into())
 }
 
 /// 总结里某一段（## 标题 下面到下一个 ## 之前）；没有或是空的就 None
@@ -404,7 +595,16 @@ pub fn generate(date: NaiveDate) -> Result<String, String> {
     r
 }
 
-fn write_day(date: NaiveDate) -> Result<String, String> {
+/// 一天的材料：给模型看的原文，和总结页上要列的几样
+struct DayInput {
+    user: String,
+    stats: Vec<String>,
+    domains: Vec<String>,
+    acts: Vec<String>,
+    rules: Vec<(String, String, Option<bool>)>,
+}
+
+fn day_input(date: NaiveDate) -> Result<DayInput, String> {
     let mut day = crate::data::get_day(date.format("%Y-%m-%d").to_string());
     // 有外部数据包的日子 get_day 不算电脑读数（页面用数据包的），这里要用：在电脑前、规矩对照都靠它
     if day["live"].is_null() {
@@ -481,6 +681,12 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
     if let Some((_, rows)) = &speech {
         user += &format!("\n对话（录音转写，挑说得多的几个小时，每小时截前面一部分；说话人分不准，标【你】的是你说的）：\n{}\n", rows.join("\n"));
     }
+    Ok(DayInput { user, stats, domains, acts, rules })
+}
+
+fn write_day(date: NaiveDate) -> Result<String, String> {
+    let DayInput { mut user, stats, domains, acts, rules } = day_input(date)?;
+    let material = user.clone();
     // 前后 7 天的点评引过的句子：别天天引同一句
     let used: Vec<String> = (-7..=7i64).filter(|k| *k != 0)
         .filter_map(|k| fs::read_to_string(path_of(date + Duration::days(k))).ok().and_then(|t| quote_of(&t)))
@@ -490,15 +696,7 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
     }
     let sm = beayy_summary::Summarizer::new(default_root());
     let j = sm.ask_as("daily", PROMPT, &user)?;
-    let roast = if roast_on() {
-        let before: Vec<String> = (1..=3i64).rev()
-            .filter_map(|k| fs::read_to_string(path_of(date - Duration::days(k))).ok().and_then(|t| section_of(&t, "棒喝")).map(|r| format!("{}：{r}", (date - Duration::days(k)).format("%m-%d"))))
-            .collect();
-        let used = if before.is_empty() { String::new() } else { format!("\n前几天骂过：\n- {}\n", before.join("\n- ")) };
-        roast_of(&sm, "daily", ROAST, &format!("{user}{used}"), 3)
-    } else {
-        None
-    };
+    let roast = roast_level().and_then(|lv| roast_day(&sm, date, &material, lv));
     let list = |k: &str| -> String {
         let v: Vec<String> = j.get(k).and_then(Value::as_array).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| format!("- {s}"))).collect();
         if v.is_empty() { "- 没有".into() } else { v.join("\n") }
@@ -584,7 +782,8 @@ pub fn generate_week(monday: NaiveDate) -> Result<String, String> {
     r
 }
 
-fn write_week(monday: NaiveDate) -> Result<String, String> {
+/// 一周的材料：这周有几份日总结，和拼起来给模型看的原文
+fn week_input(monday: NaiveDate) -> Result<(usize, String), String> {
     let days: Vec<(NaiveDate, String)> = (0..7)
         .map(|k| monday + Duration::days(k))
         .filter_map(|d| fs::read_to_string(path_of(d)).ok().map(|t| (d, t)))
@@ -596,9 +795,14 @@ fn write_week(monday: NaiveDate) -> Result<String, String> {
         let body: String = t.lines().filter(|l| !l.starts_with('>') && !l.starts_with("# ")).collect::<Vec<_>>().join("\n");
         format!("==== {} 周{} ====\n{}\n\n", d.format("%Y-%m-%d"), ["日", "一", "二", "三", "四", "五", "六"][d.format("%w").to_string().parse::<usize>().unwrap_or(0)], body.trim())
     }).collect();
+    Ok((days.len(), user))
+}
+
+fn write_week(monday: NaiveDate) -> Result<String, String> {
+    let (n, user) = week_input(monday)?;
     let sm = beayy_summary::Summarizer::new(default_root());
     let j = sm.ask_as("weekly", WEEK_PROMPT, &user)?;
-    let roast = if roast_on() { roast_of(&sm, "weekly", WEEK_ROAST, &user, 4) } else { None };
+    let roast = roast_level().and_then(|lv| roast_week(&sm, monday, &user, lv));
     let list = |k: &str| -> String {
         let v: Vec<String> = j.get(k).and_then(Value::as_array).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| format!("- {s}"))).collect();
         if v.is_empty() { "- 没有".into() } else { v.join("\n") }
@@ -609,7 +813,7 @@ fn write_week(monday: NaiveDate) -> Result<String, String> {
         "# {} – {} 周总结\n\n> 由 Beayy 用这一周的 {} 份日总结生成，数据截至 {}。\n\n## 这周的一句话\n\n{}\n\n## 做成了什么\n\n{}\n\n## 时间和作息\n\n{}\n\n## 偏离\n\n{}\n\n## 下周\n\n{}\n",
         monday.format("%m-%d"),
         sunday.format("%m-%d"),
-        days.len(),
+        n,
         Local::now().format("%m-%d %H:%M"),
         j.get("line").and_then(Value::as_str).unwrap_or("").trim(),
         list("done"),
@@ -929,9 +1133,20 @@ mod tests {
 
     #[test]
     fn roast_check() {
-        assert!(roast_faults("操，你他妈的又切了 700 次，扯淡。", 3).is_empty());
-        assert_eq!(roast_faults("你他妈的又切了 700 次。", 3).len(), 1);
-        assert_eq!(roast_faults("操他妈扯淡。你不是没本事，是怕交卷", 3).len(), 1);
-        assert_eq!(roast_faults("操他妈扯淡。这不是并行推进，而是每件事都摸一下", 3).len(), 1);
+        let (lv, m) = (&LEVELS[1], "在电脑前 6.2 小时，切换 app 689 次");
+        let f = |r: &str, before: &[String]| roast_faults(r, lv, 3, 3, before, m, true);
+        assert!(f("操，你他妈的又切了 689 次，扯淡。", &[]).is_empty());
+        assert_eq!(f("你他妈的又切了 689 次。", &[]).len(), 1);
+        assert_eq!(f("操他妈扯淡。你不是没本事，是怕交卷", &[]).len(), 1);
+        assert_eq!(f("操他妈扯淡。这不是并行推进，而是每件事都摸一下", &[]).len(), 1);
+        // 句尾补的「操」和「操作」都不算脏字：只剩 2 处，再加句尾那条
+        assert_eq!(f("他妈的又切了 689 次，扯淡，操作一下，操。", &[]).len(), 2);
+        // 数字材料里没有、梗跟前几天重样、「老哥」开头
+        assert_eq!(f("老哥，操他妈扯淡，切了 732 次，绷不住了。", &["绷不住了".into()]).len(), 3);
+        // 损：一个脏字都不带
+        assert_eq!(roast_faults("切了 689 次，扯淡。", &LEVELS[0], 0, 3, &[], m, true).len(), 1);
+        assert_eq!(unnegate("你这不是忙得顾不上收尾，是把忙活当借口。你不是被待办追着跑，你是在给待办续命"), "你这是把忙活当借口。你是在给待办续命");
+        // 英文的只查数字
+        assert!(roast_faults("You switched apps 689 times.", lv, 3, 3, &[], m, false).is_empty());
     }
 }
