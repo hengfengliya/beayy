@@ -1,0 +1,15 @@
+[package]
+name = "beayy-install"
+description = "Windows 上装、卸 Beayy：放程序、开始菜单和桌面快捷方式、开机自动启动、「应用和功能」里的卸载项。安装器（setup/）和 app 自己（开机自启开关、卸载）共用"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

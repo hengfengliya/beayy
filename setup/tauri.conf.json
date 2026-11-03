@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Beayy Setup",
+  "identifier": "com.fengli.beayy.setup",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "../src-tauri/icons/icon.png",
+      "../src-tauri/icons/icon.ico"
+    ]
+  }
+}

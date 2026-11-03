@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>安装 Beayy</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="vendor/tokens.css">
+  <link rel="stylesheet" href="vendor/bundle.css">
+  <link rel="stylesheet" href="setup.css">
+  <script src="vendor/illus.js"></script>
+</head>
+<body>
+  <header class="bar" data-tauri-drag-region>
+    <svg class="logo" viewBox="112 115 1025 1025" aria-hidden="true"><g fill="currentColor"><g transform="translate(0,1254) scale(0.1,-0.1)"><path d="M3375 10974 c-430 -62 -752 -340 -882 -759 l-28 -90 0 -2875 c0 -3168 -4 -2925 60 -3241 346 -1704 1821 -2738 3350 -2349 461 117 812 301 1475 775 426 304 539 374 805 505 560 276 1085 353 1555 228 63 -16 125 -32 137 -35 27 -6 39 74 36 242 -14 810 -947 1372 -1875 1130 -477 -124 -774 -311 -1608 -1010 -587 -492 -904 -657 -1265 -658 -577 -1 -960 536 -958 1348 3 1509 1621 2659 3073 2184 677 -222 1109 -751 1175 -1440 l6 -66 132 -6 c547 -27 1063 -268 1378 -643 41 -49 79 -91 84 -94 5 -3 15 24 22 60 91 490 39 1176 -129 1724 -364 1188 -1386 2040 -2701 2251 -947 152 -1839 -36 -2604 -550 l-68 -45 -5 1272 -5 1273 -28 100 c-125 454 -508 758 -972 770 -71 2 -143 1 -160 -1z"/></g></g></svg>
+    <span class="bar-name" data-tauri-drag-region>Beayy</span>
+    <button class="mx-iconbtn win" id="min" data-t-aria="最小化"><svg class="mx-ico" viewBox="0 0 16 16"><path d="M3.5 8h9"/></svg></button>
+    <button class="mx-iconbtn win" id="close" data-t-aria="关闭"><svg class="mx-ico" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </header>
+
+  <main>
+    <section class="screen" id="welcome">
+      <div class="art" data-illus="day"></div>
+      <h1>Beayy</h1>
+      <p class="tag">Be Authentic. Your Yesterdays.</p>
+      <button class="mx-btn mx-btn--primary big" id="go" data-t="安装"></button>
+      <p class="where"><span data-t="安装到"></span> <span class="path" id="dir"></span><button class="link" id="change" data-t="更改"></button></p>
+    </section>
+
+    <section class="screen" id="installing" hidden>
+      <div class="art" data-illus="update"></div>
+      <h2 data-t="正在安装"></h2>
+      <div class="meter"><div class="meter-fill" id="fill"></div></div>
+      <p class="pct mx-num" id="pct">0%</p>
+    </section>
+
+    <section class="screen" id="done" hidden>
+      <div class="art art--sm" data-illus="day" data-sm></div>
+      <h2 data-t="安装完成"></h2>
+      <div class="opts">
+        <div class="opt"><div><div class="opt-name" data-t="桌面快捷方式"></div></div><button class="mx-switch" role="switch" id="desktop" aria-checked="true"></button></div>
+        <div class="opt"><div><div class="opt-name" data-t="开机自动启动"></div><div class="opt-desc" data-t="登录电脑后自动开始记录"></div></div><button class="mx-switch" role="switch" id="autostart" aria-checked="true"></button></div>
+      </div>
+      <div class="actions">
+        <button class="mx-btn mx-btn--secondary big" id="finish" data-t="完成"></button>
+        <button class="mx-btn mx-btn--primary big" id="open" data-t="打开 Beayy"></button>
+      </div>
+    </section>
+
+    <section class="screen" id="failed" hidden>
+      <div class="art" data-illus="key"></div>
+      <h2 data-t="没装上"></h2>
+      <p class="err" id="err"></p>
+      <button class="mx-btn mx-btn--primary big" id="retry" data-t="重试"></button>
+    </section>
+  </main>
+
+  <footer class="ver mx-num" id="ver"></footer>
+  <script src="setup.js"></script>
+</body>
+</html>

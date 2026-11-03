@@ -185,7 +185,7 @@ pub fn start() {
         let _ = fs::remove_file(exe.with_file_name("beayy.old.exe"));
     }
     #[cfg(target_os = "windows")]
-    beayy_capture::windows::sync_installed_version();
+    beayy_install::sync_installed_version(env!("CARGO_PKG_VERSION"));
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(60));
         loop {

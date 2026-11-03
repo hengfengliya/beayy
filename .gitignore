@@ -3,3 +3,4 @@ target/
 Resources/AppIcon.iconset/
 .wrangler/
 __pycache__/
+setup/ui/vendor/

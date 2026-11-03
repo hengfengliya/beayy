@@ -1,0 +1,18 @@
+[package]
+name = "beayy-setup"
+description = "Beayy 的 Windows 安装器：一个窗口（ui/），beayy.exe 压缩后打包在里面"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+flate2 = "1"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde.workspace = true
+flate2 = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+beayy-install.workspace = true

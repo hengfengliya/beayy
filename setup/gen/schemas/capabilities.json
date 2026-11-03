@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"安装器窗口：自己的命令，加上拖动、最小化、关闭","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-start-dragging","core:window:allow-minimize","core:window:allow-close"]}}

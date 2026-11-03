@@ -113,7 +113,7 @@ fn login_item() -> bool {
     #[cfg(target_os = "macos")]
     return beayy_capture::macos::login_item_enabled();
     #[cfg(target_os = "windows")]
-    return beayy_capture::windows::login_item_enabled();
+    return std::env::current_exe().map(|e| beayy_install::login_item_enabled(&e)).unwrap_or(false);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     return false;
 }
@@ -130,7 +130,7 @@ fn set_login_item(on: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     return beayy_capture::macos::set_login_item(on);
     #[cfg(target_os = "windows")]
-    return beayy_capture::windows::set_login_item(on);
+    return beayy_install::set_login_item(&std::env::current_exe().map_err(|e| e.to_string())?, on);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     return if on { Err("这个系统上还不支持".into()) } else { Ok(()) };
 }
@@ -262,6 +262,12 @@ fn main() {
     if args.get(1).map(|a| a == "--summarize-once").unwrap_or(false) {
         // 调试用：立刻跑一次 10 分钟摘要调度（同定时任务，含锁文件），完成后退出
         summarizer::run_once(&EventLog::new(data_root(), local_device()));
+        return;
+    }
+    // 「应用和功能」里点卸载（安装器登记的卸载命令）
+    #[cfg(target_os = "windows")]
+    if args.get(1).map(|a| a == "--uninstall").unwrap_or(false) {
+        beayy_install::uninstall();
         return;
     }
     if args.get(1).map(|a| a == "--mcp").unwrap_or(false) {
