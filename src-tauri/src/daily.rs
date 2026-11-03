@@ -925,7 +925,7 @@ pub async fn generate_daily(date: String) -> Result<String, String> {
 }
 
 /// 这一天的日总结最近一次没写成：{error, at}；写成了或没试过返回 null
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn daily_status(date: String) -> Value {
     let e = &read_state()["days"][&date];
     if e["error"].is_string() && !path_of(NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap_or_default()).exists() {
@@ -936,7 +936,7 @@ pub fn daily_status(date: String) -> Value {
 }
 
 /// 某天所在那周：{monday, sunday, summary_md, error, days: [{date, line}]}
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_week(date: String) -> Result<Value, String> {
     let d = NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(|e| e.to_string())?;
     let monday = monday_of(d);
@@ -963,7 +963,7 @@ pub async fn generate_weekly(date: String) -> Result<String, String> {
 }
 
 /// 某天所在那个月：{first, last, summary_md, error, weeks: [{monday, sunday, line}]}
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_month(date: String) -> Result<Value, String> {
     let first = first_of(NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(|e| e.to_string())?);
     let weeks: Vec<Value> = mondays_of(first).into_iter().map(|m| {

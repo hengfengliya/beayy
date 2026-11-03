@@ -972,6 +972,7 @@ const TD = { date: null };
 const isPastDay = () => TD.date && TD.date !== localDay();
 
 async function renderToday() {
+  const tk = RT.seq;
   const today = isPastDay() ? TD.date : localDay(), past = today !== localDay();
   // 今天总有实时数据（电脑来自自采事件，手机来自 iPhone 同步），不再等每晚的数据包；以前的日子按日期取
   const d = (await call("get_day", { date: today })) || { date: today };
@@ -1035,7 +1036,7 @@ async function renderToday() {
     : tab === "watch" ? emptyInline(tr("今天还没有对话")) : emptyBlock("day", tr("今天还没有记录"));
 
   // 照 Claude 自定义页：标题单独一行；页签和右边的控件（同步时刻、翻日期）同一行
-  $app.innerHTML = header(past ? short(today) : tr("今天")) + toolbar
+  if (stale(tk)) return; $app.innerHTML = header(past ? short(today) : tr("今天")) + toolbar
     + `<div class="reading">${view === "timeline" ? timeline : view === "places" ? placesView : overview}</div>`;
   // 地图视图铺满窗口（不受阅读宽度限制）
   $app.classList.toggle("wide", view === "places" && pview === "map");
@@ -1598,11 +1599,12 @@ function rangeReadouts(days) {
 }
 
 async function renderSummary(arg, arg2) {
+  const tk = RT.seq;
   if (arg === "week") return renderWeek(arg2);
   if (arg === "month") return renderMonth(arg2);
   const dates = S.days.map((x) => x.date);
   const date = dates.includes(arg) ? arg : dates[0];
-  if (!date) { $app.innerHTML = header(tr("总结")) + emptyInline(tr("还没有日数据。")); return; }
+  if (!date) { if (stale(tk)) return; $app.innerHTML = header(tr("总结")) + emptyInline(tr("还没有日数据。")); return; }
   markNav("summary");
   const i = dates.indexOf(date);
   const d = await call("get_day", { date });
@@ -1638,7 +1640,7 @@ async function renderSummary(arg, arg2) {
 
   // 布局照 Claude「自定义」页：标题单独一行；下面一行左边 日／周／月 页签（月后续做），右边翻日期
   const kinds = summaryTabs("day");
-  $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${kinds}<div class="toolbar-right">${right}</div></div>` + `<div class="reading">
+  if (stale(tk)) return; $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${kinds}<div class="toolbar-right">${right}</div></div>` + `<div class="reading">
     <div class="readouts">
       ${readout(tr("在电脑前"), hh(c.active_sec ?? idx.active_sec), "h", c.first ? `${c.first}–${c.last}` : tr("取不到"))}
       ${readout(tr("手机"), hh(ph ? ph.total_sec : pp.total_sec ?? idx.phone_sec), "h", ph ? tr("同步至 {t}", { t: ymdhm(ph.synced_until) }) : pp.synced_at ? tr("同步至 {t}", { t: pp.synced_at }) : tr("取不到"))}
@@ -1662,6 +1664,7 @@ async function renderSummary(arg, arg2) {
 }
 
 async function renderWeek(arg) {
+  const tk = RT.seq;
   markNav("summary");
   const date = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : localDay();
   const w = await call("get_week", { date });
@@ -1678,7 +1681,7 @@ async function renderWeek(arg) {
   const days = `<div class="week-days">${w.days.map((x) => `<a href="#/summary/${x.date}"><span class="mono">${short(x.date)}</span><span class="${x.line ? "" : "muted"}">${esc(x.line || tr("没有日总结"))}</span></a>`).join("")}</div>`;
   const err = SUM.err || w.error;
   // 布局同日总结：读数（这周每天平均）、一句话、点评、叙述段，再是这周的地点、时间
-  $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${summaryTabs("week")}<div class="toolbar-right">${right}</div></div><div class="reading">
+  if (stale(tk)) return; $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${summaryTabs("week")}<div class="toolbar-right">${right}</div></div><div class="reading">
     ${r ? rangeReadouts(r.days) : ""}
     ${sum ? sumLead(sum, "这周的一句话") : ""}
     <div class="secs-plain" style="margin-top:var(--space-6)">
@@ -1696,6 +1699,7 @@ async function renderWeek(arg) {
 
 /** 月总结：和周总结同一个样子，底下列这个月的几周（点进周总结） */
 async function renderMonth(arg) {
+  const tk = RT.seq;
   markNav("summary");
   const date = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : localDay();
   const m = await call("get_month", { date });
@@ -1711,7 +1715,7 @@ async function renderMonth(arg) {
       <button class="dn-step" aria-label="${tr("后一个月")}" title="${tr("后一个月")}" ${next > localDay() ? "disabled" : `data-month="${next}"`}>${ICON.chevR}</button></div>`;
   const weeks = `<div class="week-days">${m.weeks.map((x) => `<a href="#/summary/week/${x.monday}"><span class="mono">${x.monday.slice(5)}–${x.sunday.slice(5)}</span><span class="${x.line ? "" : "muted"}">${esc(x.line || tr("没有周总结"))}</span></a>`).join("")}</div>`;
   const err = SUM.err || m.error;
-  $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${summaryTabs("month")}<div class="toolbar-right">${right}</div></div><div class="reading">
+  if (stale(tk)) return; $app.innerHTML = header(tr("总结")) + `<div class="toolbar">${summaryTabs("month")}<div class="toolbar-right">${right}</div></div><div class="reading">
     ${r ? rangeReadouts(r.days) : ""}
     ${sum ? sumLead(sum, "这个月的一句话") : ""}
     <div class="secs-plain" style="margin-top:var(--space-6)">
@@ -1797,6 +1801,7 @@ function ruleDialog(r, save) {
 }
 
 async function renderRules() {
+  const tk = RT.seq;
   if (!S.rules) S.rules = await call("get_rules");
   const rules = S.rules;
   const today = await call("get_day", { date: localDay() }).catch(() => null);
@@ -1814,7 +1819,7 @@ async function renderRules() {
       </div>
       ${RS.deleting === r.id ? `<div class="mx-confirm"><div class="mx-confirm-text"><b>${tr("删除这条规矩？")}</b><span>${tr("删了找不回来。")}</span></div><button class="mx-btn mx-btn--secondary" data-act="keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger" data-act="remove">${tr("删除这条")}</button></div>` : ""}
     </div>`;
-  $app.innerHTML = header(tr("规矩"), `<button class="mx-btn mx-btn--primary" id="add">${tr("加一条规矩")}</button>`)
+  if (stale(tk)) return; $app.innerHTML = header(tr("规矩"), `<button class="mx-btn mx-btn--primary" id="add">${tr("加一条规矩")}</button>`)
     + `<div class="reading" id="rules">
       ${rules.length ? rules.map(row).join("") : emptyInline(tr("用自己的话写一条规矩，比如「21:00 以后不开电脑」"))}
     </div>`;
@@ -1849,6 +1854,7 @@ const numText = (n) => Number(n || 0).toLocaleString("en-US");
 /** 设备页：照墨线的列表页和设置页——「设备」一组（一台一行，点进去是设备详情页）、「同步」一组（设置行）。
  *  本机缺权限时顶上一条提示 */
 async function renderDevices() {
+  const tk = RT.seq;
   const [devs, st, sy] = await Promise.all([call("list_devices").catch(() => []), call("get_status"), call("sync_status").catch(() => ({}))]);
   // 登录着的设备：进页面取一次，失败（没网、令牌失效）就不显示
   if (sy.email && !sy.need_login && !DS.account) { DS.account = {}; call("account_info").then((a) => { DS.account = a; if (S.page === "devices" && !DEV.id) renderDevices(); }).catch(() => {}); }
@@ -1870,7 +1876,7 @@ async function renderDevices() {
   const rows = devs.map((d) => `<a class="mx-row" href="#/devices/${encodeURIComponent(d.id)}"><span class="mx-row-mark">${DEV_ICON[d.kind] || DEV_ICON.mac}</span>
       <span class="mx-row-main"><div class="mx-row-name">${esc(d.name)}${d.this ? `<span class="mx-tag">${tr("本机")}</span>` : ""}${d.synced ? `<span class="mx-tag">${tr("经同步")}</span>` : ""}</div><div class="mx-row-desc">${devStatus(d, st)}</div></span>
       <span class="mx-row-side">${ICON.chevR}</span></a>`).join("");
-  $app.innerHTML = header(tr("设备"), `<button class="mx-btn mx-btn--primary" id="add-dev">${tr("添加设备")}</button>`)
+  if (stale(tk)) return; $app.innerHTML = header(tr("设备"), `<button class="mx-btn mx-btn--primary" id="add-dev">${tr("添加设备")}</button>`)
     + `<div class="reading">${notice}<section class="mx-sec">${rows ? `<div class="mx-list">${rows}</div>` : emptyInline(tr("还没有设备"))}</section>${syncSection(sy)}</div>`;
   document.getElementById("add-dev").onclick = () => openDialog({ title: tr("添加设备"), body: adding, cancel: tr("关闭") });
   bindSync();
@@ -1908,6 +1914,7 @@ const DEV_RECORDS = {
 /** 设备详情页：DetailHeader（返回、名字、状态、操作菜单）＋ 下划线页签 概况／事件 */
 const DEV = { id: null, tab: "overview", events: [], more: false, type: "all", live: true, open: new Set(), timer: null, err: null };
 async function renderDevice(id, tab) {
+  const tk = RT.seq;
   if (DEV.id !== id) { DEV.events = []; DEV.more = false; DEV.type = "all"; DEV.open = new Set(); DEV.err = null; }
   DEV.id = id; DEV.tab = tab === "events" ? "events" : "overview";
   const [devs, st] = await Promise.all([DS.devs ? Promise.resolve(DS.devs) : call("list_devices").catch(() => []), call("get_status")]);
@@ -1920,7 +1927,7 @@ async function renderDevice(id, tab) {
       <div class="pick"><button class="mx-btn mx-btn--secondary" id="dev-ops" aria-haspopup="menu" aria-expanded="false">${tr("操作")}${ICON.chevD}</button>
         <div class="mx-menu" role="menu" hidden><button role="menuitem" id="dev-rename">${tr("重命名")}</button></div></div></div>
     <nav class="mx-utabs"><a href="${base}" class="${DEV.tab === "overview" ? "is-on" : ""}">${tr("概况")}</a><a href="${base}/events" class="${DEV.tab === "events" ? "is-on" : ""}">${tr("事件")}</a></nav></div>`;
-  $app.innerHTML = `<div class="reading">${head}<div id="dev-body">${DEV.tab === "events" ? evShell(d) : devOverview(d, st)}</div></div>`;
+  if (stale(tk)) return; $app.innerHTML = `<div class="reading">${head}<div id="dev-body">${DEV.tab === "events" ? evShell(d) : devOverview(d, st)}</div></div>`;
   bindPick(document.getElementById("dev-ops"));
   document.getElementById("dev-rename").onclick = () => renameDialog(d, () => { DS.devs = null; renderDevice(id, DEV.tab); });
   $app.querySelectorAll("[data-perm]").forEach((b) => (b.onclick = () => call("open_permission", { kind: b.dataset.perm })));
@@ -2619,16 +2626,20 @@ const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
 const KEEP = tr("已存，留空不改");
 
 async function renderSettings() {
+  const tk = RT.seq;
   if (!S.settings) { S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings)); }
   // 手机版不采集：没有「记录」页（暂停、不记录的 app、删最近记录都是电脑上的事）
   const tabsHere = S.status && S.status.mobile ? SET_TABS.filter(([k]) => k !== "record") : SET_TABS;
   const tab = tabsHere.some(([k]) => k === SS.tab) ? SS.tab : "general";
-  const sy = await call("sync_status").catch(() => ({}));
-  S.sync = sy;
-  if (tab === "projects") PJ.list = PJ.list || await call("list_projects").catch(() => []);
-  S.profile = await call("get_profile").catch(() => S.profile);
-  S.status = await call("get_status");
-  if (TAURI) S.update = await call("update_status").catch(() => S.update);
+  // 几样互不相干，一起问（原来一个等一个）
+  const [sy, pj, prof, st0, up] = await Promise.all([
+    call("sync_status").catch(() => ({})),
+    tab === "projects" && !PJ.list ? call("list_projects").catch(() => []) : PJ.list,
+    call("get_profile").catch(() => S.profile),
+    call("get_status"),
+    TAURI ? call("update_status").catch(() => S.update) : S.update,
+  ]);
+  S.sync = sy; PJ.list = pj; S.profile = prof; S.status = st0; S.update = up;
   renderSide();
   const st = S.status, cf = S.settings;
   const theme = document.documentElement.dataset.theme || "";
@@ -2698,7 +2709,7 @@ async function renderSettings() {
   } else {
     body = projectsSection();
   }
-  $app.innerHTML = header(tr("设置")) + `<div class="set-wrap">${tabs}<div class="form">${body}</div></div>`;
+  if (stale(tk)) return; $app.innerHTML = header(tr("设置")) + `<div class="set-wrap">${tabs}<div class="form">${body}</div></div>`;
 
   document.getElementById("set-tabs").onclick = (e) => {
     const b = e.target.closest("[data-st]"); if (!b) return;
@@ -3107,7 +3118,13 @@ async function renderOnboarding() {
 
 // ---------- 路由 ----------
 
+// 换页：后台命令不在主线程排队了，回来的先后不定，慢的那页晚回来不许盖掉已经换过去的页（各页写页面前看 stale）。
+// 点了先把这页上次的样子摆出来（还点不了），没看过的把旧页淡下去，数据到了再换成新的
+const RT = { seq: 0, snap: new Map() };
+const stale = (tk) => tk !== RT.seq;
+
 async function route() {
+  const tk = ++RT.seq, key = location.hash || "#/today";
   const [page = "today", arg, arg2] = location.hash.replace(/^#\/?/, "").split("/");
   // 换页就关掉弹层；刚拿到恢复码那个必须点「我已存好」才关
   if (DLG && DLG.closable) closeDialog();
@@ -3122,14 +3139,23 @@ async function route() {
     }
     if (!S.settings.onboarded && TAURI && !(S.status && S.status.mobile)) return renderOnboarding();
     if (S.page !== "devices") { DEV.id = null; stopEventsTimer(); }
+    const snap = RT.snap.get(key);
+    if (snap && $app.dataset.key !== key) { $app.innerHTML = snap; document.getElementById("main").scrollTop = 0; }
+    $app.classList.add(snap ? "is-stale" : "is-wait");
     if (S.page === "summary") await renderSummary(arg, arg2);
     else if (S.page === "rules") await renderRules();
     else if (S.page === "devices") { if (arg) await renderDevice(decodeURIComponent(arg), arg2); else { DEV.id = null; stopEventsTimer(); await renderDevices(); } }
     else if (S.page === "settings") await renderSettings();
     else { TD.date = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : null; await renderToday(); }
+    if (stale(tk)) return;
     document.getElementById("main").scrollTop = 0;
+    RT.snap.delete(key); RT.snap.set(key, $app.innerHTML); $app.dataset.key = key;
+    if (RT.snap.size > 30) RT.snap.delete(RT.snap.keys().next().value);
   } catch (e) {
+    if (stale(tk)) return;
     $app.innerHTML = header(tr("出错了")) + `<p class="mx-error">${esc(e && e.message ? e.message : e)}</p>`;
+  } finally {
+    if (!stale(tk)) $app.classList.remove("is-stale", "is-wait");
   }
 }
 

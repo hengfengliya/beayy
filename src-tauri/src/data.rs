@@ -291,6 +291,15 @@ fn phone_sessions(used: &[&(f64, f64, String)], names: &HashMap<String, String>)
 
 // ---------- 摘要 ----------
 
+/// 解析过的 10 分钟摘要：文件 →（修改时间、大小、本地日期、这一段，parts 还没归一）。文件没变就不再读
+static SEG_FILES: std::sync::LazyLock<std::sync::Mutex<HashMap<PathBuf, (std::time::SystemTime, u64, String, Value)>>> = std::sync::LazyLock::new(Default::default);
+
+/// 文件的（修改时间、大小）：缓存用来判断变没变
+fn stamp(p: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let m = fs::metadata(p).ok()?;
+    Some((m.modified().ok()?, m.len()))
+}
+
 fn self_segments() -> HashMap<String, Vec<Value>> {
     let mut out: HashMap<String, Vec<Value>> = HashMap::new();
     // 项目名按别名表归到规范名，领域按登记表固定（同一个项目前后一致）
@@ -330,6 +339,10 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
         }
     }
     files.sort();
+    // 2000 多个文件每次都读一遍要 150–600 毫秒：只读新的、改过的，其余用缓存（别名表、领域表每次重新套，改了马上生效）
+    let mut cache = SEG_FILES.lock().unwrap_or_else(|e| e.into_inner());
+    let listed: HashSet<&PathBuf> = files.iter().map(|(f, _)| f).collect();
+    cache.retain(|p, _| listed.contains(p));
     let front_re = Regex::new(r"(?m)^(title|description|applications): (.*)$").unwrap();
     let mem_re = Regex::new(r"(?ms)^## Memory summary\n+(.+?)(?:\n#|\z)").unwrap();
     let ctx_re = Regex::new(r"(?ms)^### Important non-obvious context about the user\n+(.+?)(?:\n#|\z)").unwrap();
@@ -343,6 +356,15 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
         let start = Utc.from_utc_datetime(&start);
         let six = name.contains("-6h-");
         let end = start + if six { Duration::hours(6) } else { Duration::minutes(10) };
+        let st = stamp(&f);
+        if let Some((m, n, date, seg)) = cache.get(&f) {
+            if st == Some((*m, *n)) {
+                let mut seg = seg.clone();
+                seg["parts"] = canon(seg.get("parts"));
+                out.entry(date.clone()).or_default().push(seg);
+                continue;
+            }
+        }
         let md = fs::read_to_string(&f).unwrap_or_default();
         let head = md.split("\n---").next().unwrap_or("");
         let front: HashMap<String, String> = front_re.captures_iter(head).map(|c| (c[1].to_string(), c[2].to_string())).collect();
@@ -352,9 +374,9 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
             .unwrap_or_default();
         let date = start.with_timezone(&Local).format("%Y-%m-%d").to_string();
         let fm = beayy_summary::front(&md);
-        out.entry(date).or_default().push(json!({
+        let seg = json!({
             "active_sec": fm.get("active_sec").cloned().unwrap_or(Value::Null),
-            "parts": canon(fm.get("parts")),
+            "parts": fm.get("parts").cloned().unwrap_or(Value::Null),
             "start": utc_iso(start), "end": utc_iso(end), "kind": if six { "6h" } else { "10min" }, "source": "beayy", "device": device,
             "title": front.get("title").cloned().unwrap_or_default(),
             "apps": front.get("applications").map(|a| a.trim_matches(|c| c == '[' || c == ']').split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect::<Vec<_>>()).unwrap_or_default(),
@@ -362,7 +384,13 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
             "memory": mem_re.captures(&md).map(|c| c[1].trim().to_string()).unwrap_or_default(),
             "context": ctx,
             "recording": rec_re.captures(&md).map(|c| c[1].trim().to_string()).unwrap_or_default(),
-        }));
+        });
+        if let Some((m, n)) = st {
+            cache.insert(f.clone(), (m, n, date.clone(), seg.clone()));
+        }
+        let mut seg = seg;
+        seg["parts"] = canon(seg.get("parts"));
+        out.entry(date).or_default().push(seg);
     }
     out
 }
@@ -527,8 +555,12 @@ const MERGE_GAP: f64 = 20.0;
 const REC_GAP: f64 = 300.0;
 
 /// 某种设备（watch-、iphone-）在 [from, to) 里的事件：只读这段时间的分段目录
+/// device_events 读过的：（events.jsonl, 要的类型）→（修改时间、大小、挑出来的事件）。地点统计 30 天每个文件要读三遍
+static EV_FILES: std::sync::LazyLock<std::sync::Mutex<HashMap<(PathBuf, String), (std::time::SystemTime, u64, Vec<Value>)>>> = std::sync::LazyLock::new(Default::default);
+
 fn device_events(prefix: &str, types: &[&str], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Value> {
     let mut out = vec![];
+    let kinds = types.join(",");
     let (lo, hi) = (beayy_core::segment_key(from), beayy_core::segment_key(to));
     let Ok(devs) = fs::read_dir(default_root().join("devices")) else { return out };
     for dev in devs.filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with(prefix)) {
@@ -538,17 +570,29 @@ fn device_events(prefix: &str, types: &[&str], from: DateTime<Utc>, to: DateTime
             if n < lo || n > hi {
                 continue;
             }
-            let Ok(bytes) = fs::read(seg.path().join("events.jsonl")) else { continue };
+            let path = seg.path().join("events.jsonl");
+            let Some(st) = stamp(&path) else { continue };
+            let key = (path, kinds.clone());
+            if let Some((m, n, evs)) = EV_FILES.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+                if (*m, *n) == st {
+                    out.extend(evs.iter().cloned());
+                    continue;
+                }
+            }
+            let Ok(bytes) = fs::read(&key.0) else { continue };
+            let mut evs = vec![];
             for line in String::from_utf8_lossy(&bytes).lines() {
                 if !types.iter().any(|t| line.contains(t)) {
                     continue;
                 }
                 if let Ok(e) = serde_json::from_str::<Value>(line) {
                     if types.iter().any(|t| e["event_type"] == *t) {
-                        out.push(e);
+                        evs.push(e);
                     }
                 }
             }
+            out.extend(evs.iter().cloned());
+            EV_FILES.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (st.0, st.1, evs));
         }
     }
     out
@@ -795,7 +839,7 @@ pub fn clear_place_pick(id: String) -> Result<(), String> {
 
 /// 「地点 · 常去」：最近 days 天（默认 30）的停留按地方合计。起过名的按名字合（没去过的也列，次数 0），
 /// 没起名的按区域合（同一个区县 · 区域），只列去过 5 次以上的。只用缓存，不问高德（没缓存过分级的用手机传来的地名）
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn place_stats(days: Option<i64>) -> Value {
     let days = days.unwrap_or(30).clamp(1, 120);
     let today = Local::now().date_naive();
@@ -842,7 +886,7 @@ pub fn place_stats(days: Option<i64>) -> Value {
 }
 
 /// 常去的地方（自己起过名的）：[{label, type, lat, lon, r, address?}]，设置页列出来改
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn list_place_labels() -> Vec<Value> {
     place_labels()
 }
@@ -1117,7 +1161,7 @@ fn spans_in(spans: &Value, from: DateTime<Utc>, to: DateTime<Utc>) -> f64 {
 
 /// 一段日子（周、月总结页用）：每天的在电脑前、手机、拿起、熬夜（这一晚＝当天 21:00 以后＋次日 0–5 点，同日总结）、停留点，
 /// 加上整段的时间花在哪（项目、类型）。今天以后的日子不算
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_range(from: String, to: String) -> Result<Value, String> {
     let a = NaiveDate::parse_from_str(&from, "%Y-%m-%d").map_err(|e| e.to_string())?;
     let z = NaiveDate::parse_from_str(&to, "%Y-%m-%d").map_err(|e| e.to_string())?.min(Local::now().date_naive());
@@ -1192,7 +1236,7 @@ fn computer_hours(c: &Value) -> Value {
     Value::Object(m)
 }
 
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn list_days() -> Vec<Value> {
     let repo = repo_path();
     let names = app_names();
@@ -1254,7 +1298,7 @@ fn raw_days() -> HashSet<String> {
         .collect()
 }
 
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_day(date: String) -> Value {
     let repo = repo_path();
     let Ok(nd) = NaiveDate::parse_from_str(&date, "%Y-%m-%d") else { return Value::Null };
@@ -1405,7 +1449,7 @@ fn rules_path() -> PathBuf {
     default_root().join("rules.json")
 }
 
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_rules() -> Value {
     fs::read_to_string(rules_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!([]))
 }
@@ -1418,7 +1462,7 @@ pub fn save_rules(rules: Value) -> Result<(), String> {
 
 
 /// settings.json 的键沿用 Python 摘要脚本的叫法（summary_model、daily_model、blacklist），对网页换成 COMMANDS.md 的叫法
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_settings() -> Value {
     let s = read_settings_raw();
     let get = |k: &str, d: &str| s.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
@@ -1559,7 +1603,7 @@ pub fn delete_since(minutes: Option<i64>, today: Option<bool>) -> Result<usize, 
 /// 或往回翻了 48 个分段（8 小时）就停，不全量扫。before＝只要这个时刻以前的（「加载更早」接着读）；
 /// types＝只要这些种类，以「.」结尾的按前缀算（keyboard. 包含 keyboard.text_input、keyboard.submit……）。
 /// 打的字、界面文字原样返回（采集时密码框已经打码），只给本机界面看，不进网站
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn recent_events(device: String, before: Option<String>, limit: Option<usize>, types: Option<Vec<String>>) -> Result<Value, String> {
     if device.is_empty() || !device.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
         return Err("设备编号不对".into());
@@ -1607,7 +1651,7 @@ pub fn recent_events(device: String, before: Option<String>, limit: Option<usize
 }
 
 /// 数据目录里的每台设备（devices/<设备>/）：种类、是不是本机、记录从哪天开始、最近一条、条数、占用空间。缓存 60 秒
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn list_devices() -> Vec<Value> {
     let mut g = DEV_CACHE.lock().unwrap();
     if let Some((t, v)) = g.as_ref() {
@@ -1703,7 +1747,7 @@ fn read_devices() -> Vec<Value> {
 // ---------- 头像和名称 ----------
 
 /// 本机存的显示名称和头像（settings.json 的 profile_*）；没设名称时用账号邮箱 @ 前面那段，再没有就「我」
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_profile() -> Value {
     let s = read_settings_raw();
     let email = beayy_sync::load(&beayy_core::data_root()).and_then(|a| a.email);
@@ -1747,7 +1791,7 @@ pub async fn save_profile(name: String, avatar: Option<String>) -> Result<(), St
 // ---------- 项目（领域 · 项目） ----------
 
 /// 所有出现过的项目：规范名、领域、累计时长、最近一次、被合并进来的别名
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn list_projects() -> Vec<Value> {
     let sm = beayy_summary::Summarizer::new(default_root());
     let aliases = sm.aliases();
@@ -1803,7 +1847,7 @@ pub async fn llm_status() -> Value {
 
 /// 模型用量（设置 → 连接 → 模型 → 用量）：最近 30 天每天的输入、输出 token，按用途分。
 /// 记在 logs/llm_usage.jsonl（0.2.26 起每次调模型记一行）；那以前的只有 10 分钟摘要，从 summarizer.log 的「用量 a+b token」补
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn llm_usage() -> Value {
     let logs = default_root().join("logs");
     let since = Local::now().date_naive() - Duration::days(29);

@@ -204,7 +204,7 @@ pub fn check_soon() {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_status() -> Value {
     status()
 }

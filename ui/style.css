@@ -696,3 +696,7 @@ a.mx-btn { text-decoration: none; }
 ol.up-notes li { position: relative; padding-left: 20px; counter-increment: up; }
 ol.up-notes li::before { content: counter(up) "."; position: absolute; left: 0; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .raw-note { margin: 0 0 var(--space-3); }
+
+/* 换页（app.js 的 route）：摆出来的是这页上次的样子，数据到了才能点；没看过的页旧页先停着，过 0.12 秒还没好再淡下去，快的时候不闪 */
+#app.is-stale, #app.is-wait { pointer-events: none; }
+#app.is-wait { opacity: .45; transition: opacity .15s .12s; }

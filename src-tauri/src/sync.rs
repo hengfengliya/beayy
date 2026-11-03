@@ -71,7 +71,7 @@ fn pull_profile() {
     }
 }
 
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn sync_status() -> Value {
     let mut v = beayy_sync::status(&data_root());
     v["running"] = json!(RUNNING.load(Ordering::SeqCst));
@@ -130,7 +130,7 @@ pub async fn signup_info() -> Value {
 }
 
 /// 设置里选的同步文件夹：路径、在不在、里面开没开过同步（账号页据此给「新开」还是「加入」）
-#[cfg_attr(not(beayy_mobile), tauri::command)]
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn folder_state() -> Value {
     beayy_sync::folder_state(&folder())
 }
