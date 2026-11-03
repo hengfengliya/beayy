@@ -220,6 +220,74 @@ const PROMPT: &str = "你是用户的日记助手。下面是用户今天的记�
 材料最后如果列了「前后几天的点评已经引过」，quote 换一句：别出自同一篇、同一个人，意思也别相近；那几句如果多是中国古诗文，这次换个门类（现当代文学、外国文学、电影、名人语录等）。
 ";
 
+// 棒喝（设置里打开才写）：单独问一次模型，换成贴吧老哥的人设，免得和日记助手「不刻薄」的口吻打架。
+// 去 AI 味的几条取自 fl-deslop；哲理要从当天的事里说破，不引名言（名言归点评）
+const ROAST_HOW: &str = "怎么骂：
+- 贴吧老哥的口吻：叫他「老哥」，阴阳怪气、反问、夸张的比喻，先嘲讽再补刀。贴吧梗每段 1–2 个（绷不住了、好家伙、乐、急了、就这、赢麻了、属实、蚌埠住了、6、典这类），用对场合，别堆，别每次都用同一个。
+- 口语，短句，一句一刀。带脏字（他妈、操、卧槽、扯淡、狗屁、傻逼这类），全段至少 3 处，骂到点上用，别句句带。
+- 每一刀都落在材料里的具体事上：几点、几分钟、哪个 app、哪个项目、哪条规矩。只写材料里有的，不编；材料说了不准、不全的数不拿来骂。
+- 最狠的一刀拿他自己打他：他定的规矩、说要做没做的事、他在做的东西（比如他做的产品本身就是管时间、管专注、管待办的，他自己却管不住）、他擅长的本事，跟实际干的摆在一起，让反差自己说话。
+- 哲理藏在骂里：挑最该骂的一件，说破他为什么会这样，在躲什么、拿什么换了什么、哪件事是因为有人催才先做的。直接说他在干什么（「你在拿……换……」「你怕的是……」），大白话一句说透，具体到这些事，这一句不用梗；不引名言，不讲人人都懂的道理，不熬鸡汤。
+- 骂行为，不骂人格；不碰外貌、身体、健康、家人、伴侣和其他人。干得好的地方照实认一句就过，别夸。
+- 不先否定一个说法再给结论。❌「你不是没本事，是怕交卷」 ✅「你怕交卷」；❌「这不是并行推进，是每件事都摸一下」 ✅「你每件事都摸一下，好让自己觉得全在动」。「不是……是……」「不是……而是……」「与其说……不如说」一律不写。
+- 不说「这点我认」「我承认」这种裁判腔；不三连排比；不用破折号；不加「说白了」「一句话」「记住」这类报幕。
+- 最后一句是一刀，最好就是说破的那句，骂完就停：不给建议，不写「明天先……」「别再……」，不升华、不鼓励。
+- 写完自己查一遍上面几条，犯了就改掉再交。
+";
+
+const ROAST: &str = "你是在贴吧混了很多年的老哥，跟用户认识很久，嘴毒，说话不留情面。用户自己要你每天给他来一下棒喝，一棒打醒。下面是他今天的记录：电脑和手机的时长、时间花在哪些领域和项目、每小时在做什么、他自己定的规矩今天守没守住，有的话还有去了哪、对话（录音转写）和健康。
+读完骂他，骂得狠、骂得准，骂完让他心里一沉、想改。材料最后如果列了「前几天骂过」，换个角度骂，那几段用过的梗这次别再用；同一个毛病连着几天还在犯，点明第几天了，骂得更重。
+只返回一个 JSON 对象，不要代码块：{\"roast\": \"……\"}。roast 是 150–250 字的一段话，中文，对他用「你」。
+";
+
+const WEEK_ROAST: &str = "你是在贴吧混了很多年的老哥，跟用户认识很久，嘴毒，说话不留情面。用户自己要你每周给他来一下棒喝，一棒打醒。下面是他这一周每天的日总结（有的天可能没有，里面的「棒喝」是你每天骂过的）。
+骂这一周的模式：哪个毛病天天犯、哪件事说了一周没动、哪天最离谱、时间实际给了谁。每天骂过的别照抄，往上提一层，骂那个让这些天反复出事的根子。
+只返回一个 JSON 对象，不要代码块：{\"roast\": \"……\"}。roast 是 250–400 字，一两段话，中文，对他用「你」；脏字全段至少 4 处。
+";
+
+/// 写棒喝（日总结、周总结共用）；出错只是少这一段，总结照写。脏字不够、写了「不是……是……」的，指出来让它重写一次
+fn roast_of(sm: &beayy_summary::Summarizer, kind: &str, system: &str, user: &str, min_curse: usize) -> Option<String> {
+    let system = format!("{system}{ROAST_HOW}");
+    let ask = |u: &str| -> Option<String> {
+        let j = sm.ask_as(kind, &system, u).map_err(|e| eprintln!("棒喝没写成：{e}")).ok()?;
+        j.get("roast").and_then(Value::as_str).map(|r| r.trim().to_string()).filter(|r| !r.is_empty())
+    };
+    let first = ask(user)?;
+    let faults = roast_faults(&first, min_curse);
+    if faults.is_empty() {
+        return Some(first);
+    }
+    Some(ask(&format!("{user}\n\n你上一版：{first}\n上一版的毛病：{}。照「怎么骂」重写。", faults.join("；"))).unwrap_or(first))
+}
+
+/// 棒喝的硬毛病：脏字少于 min 处、有先否定再给结论的句子
+fn roast_faults(r: &str, min: usize) -> Vec<String> {
+    let mut out = vec![];
+    let n: usize = ["他妈", "操", "卧槽", "扯淡", "狗屁", "傻逼", "妈的", "屁"].iter().map(|w| r.matches(w).count()).sum::<usize>()
+        - r.matches("他妈").count().min(r.matches("妈的").count()) // 「他妈的」别算两处
+        - r.matches("狗屁").count(); // 「狗屁」里的「屁」别再算一处
+    if n < min {
+        out.push(format!("脏字只有 {n} 处，至少要 {min} 处"));
+    }
+    if let Some(m) = Regex::new(r"不是[^。！？；]{0,24}?[，,；;]\s*(而|就|你)?是").unwrap().find(r) {
+        out.push(format!("「{}」是先否定再给结论，直接说结论", m.as_str()));
+    }
+    out
+}
+
+/// 棒喝开着没有（settings.json 的 roast）
+fn roast_on() -> bool {
+    crate::data::read_settings_raw().get("roast").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// 总结里某一段（## 标题 下面到下一个 ## 之前）；没有或是空的就 None
+fn section_of(md: &str, title: &str) -> Option<String> {
+    let head = format!("## {title}");
+    let body: Vec<&str> = md.lines().skip_while(|l| l.trim_end() != head).skip(1).take_while(|l| !l.starts_with("## ")).collect();
+    let t = body.join("\n").trim().to_string();
+    (!t.is_empty()).then_some(t)
+}
+
 /// 苹果健康：昨晚睡眠一行、活动和锻炼一行、心情一行（有才写）
 fn health_lines(h: &Value) -> Vec<String> {
     let mut out = vec![];
@@ -422,6 +490,15 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
     }
     let sm = beayy_summary::Summarizer::new(default_root());
     let j = sm.ask_as("daily", PROMPT, &user)?;
+    let roast = if roast_on() {
+        let before: Vec<String> = (1..=3i64).rev()
+            .filter_map(|k| fs::read_to_string(path_of(date - Duration::days(k))).ok().and_then(|t| section_of(&t, "棒喝")).map(|r| format!("{}：{r}", (date - Duration::days(k)).format("%m-%d"))))
+            .collect();
+        let used = if before.is_empty() { String::new() } else { format!("\n前几天骂过：\n- {}\n", before.join("\n- ")) };
+        roast_of(&sm, "daily", ROAST, &format!("{user}{used}"), 3)
+    } else {
+        None
+    };
     let list = |k: &str| -> String {
         let v: Vec<String> = j.get(k).and_then(Value::as_array).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| format!("- {s}"))).collect();
         if v.is_empty() { "- 没有".into() } else { v.join("\n") }
@@ -446,7 +523,12 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
     if !rules.is_empty() {
         md += &format!("\n## 规矩\n\n{}\n", rules.iter().map(|(t, d, ok)| format!("- {} {t}：{d}", match ok { Some(true) => "✓", Some(false) => "✗", None => "·" })).collect::<Vec<_>>().join("\n"));
     }
-    md += &format!("\n## 偏离\n\n{}\n\n## 明天\n\n{}\n", list("drift"), list("tomorrow"));
+    md += &format!("\n## 偏离\n\n{}\n", list("drift"));
+    // 棒喝接在偏离后面
+    if let Some(r) = &roast {
+        md += &format!("\n## 棒喝\n\n{r}\n");
+    }
+    md += &format!("\n## 明天\n\n{}\n", list("tomorrow"));
     let p = path_of(date);
     fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&p, &md).map_err(|e| e.to_string())?;
@@ -516,6 +598,7 @@ fn write_week(monday: NaiveDate) -> Result<String, String> {
     }).collect();
     let sm = beayy_summary::Summarizer::new(default_root());
     let j = sm.ask_as("weekly", WEEK_PROMPT, &user)?;
+    let roast = if roast_on() { roast_of(&sm, "weekly", WEEK_ROAST, &user, 4) } else { None };
     let list = |k: &str| -> String {
         let v: Vec<String> = j.get(k).and_then(Value::as_array).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| format!("- {s}"))).collect();
         if v.is_empty() { "- 没有".into() } else { v.join("\n") }
@@ -536,6 +619,9 @@ fn write_week(monday: NaiveDate) -> Result<String, String> {
     );
     if !remark.is_empty() {
         md = md.replacen("\n## 做成了什么\n", &format!("\n## 点评\n\n{remark}\n\n## 做成了什么\n"), 1);
+    }
+    if let Some(r) = &roast {
+        md = md.replacen("\n## 下周\n", &format!("\n## 棒喝\n\n{r}\n\n## 下周\n"), 1);
     }
     let p = week_path(monday);
     fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -832,5 +918,20 @@ mod tests {
         assert_eq!(r, "「行到水穷处，坐看云起时」（王维《终南别业》）你今天……");
         assert_eq!(quote_of(&format!("## 今天的一句话\n\n一句\n\n## 点评\n\n{r}\n")).as_deref(), Some("行到水穷处，坐看云起时"));
         assert_eq!(remark_of(serde_json::json!({"remark": "只有正文"}).as_object().unwrap()), "只有正文");
+    }
+
+    #[test]
+    fn sections() {
+        let md = "# 11-02\n\n## 偏离\n\n- 一条\n\n## 棒喝\n\n骂了一段\n第二行\n\n## 明天\n\n- 打电话\n";
+        assert_eq!(section_of(md, "棒喝").as_deref(), Some("骂了一段\n第二行"));
+        assert_eq!(section_of(md, "点评"), None);
+    }
+
+    #[test]
+    fn roast_check() {
+        assert!(roast_faults("操，你他妈的又切了 700 次，扯淡。", 3).is_empty());
+        assert_eq!(roast_faults("你他妈的又切了 700 次。", 3).len(), 1);
+        assert_eq!(roast_faults("操他妈扯淡。你不是没本事，是怕交卷", 3).len(), 1);
+        assert_eq!(roast_faults("操他妈扯淡。这不是并行推进，而是每件事都摸一下", 3).len(), 1);
     }
 }

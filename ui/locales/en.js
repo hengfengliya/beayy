@@ -868,6 +868,8 @@ window.I18N_EN = {
   "游戏": "Games",
   "10 分钟摘要、日总结、周总结、月总结用哪种语言写": "Language for 10-minute summaries and daily, weekly and monthly summaries",
   "AI 总结的语言": "AI summary language",
+  "棒喝": "Roast",
+  "日总结、周总结多一段狠话，带脏字": "Adds a harsh, profane section to daily and weekly summaries",
   "Key 已存": "Key saved",
   "OpenStreetMap · 免费，不用 Key": "OpenStreetMap · Free, no key needed",
   "全球免费，不用 Key；中国大陆的地点和店名不如高德全": "Free worldwide, no key needed; places and shop names in mainland China are less complete than AMap",

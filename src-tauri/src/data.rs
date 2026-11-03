@@ -1455,13 +1455,15 @@ pub fn get_settings() -> Value {
         // AI 总结的语言：zh／en，空＝跟随界面语言（ui_lang 是界面启动时报的）
         "summary_language": get("summary_language", ""),
         "ui_lang": get("ui_lang", ""),
+        // 棒喝：日总结、周总结多写一段狠话（带脏字），默认关
+        "roast": s.get("roast").and_then(Value::as_bool).unwrap_or(false),
     })
 }
 
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast")];
     for (from, to) in map {
         if let Some(mut v) = settings.get(from).cloned() {
             // 同步服务器、转写服务填的就是官方的，存成空（官方地址以后变了跟着变）
