@@ -19,6 +19,8 @@ objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# 程序图标编成 PNG（windows/icon.rs）
+png = "0.17"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
@@ -35,5 +37,6 @@ windows = { version = "0.62", features = [
   "Win32_System_Variant",
   "Win32_UI_Accessibility",
   "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }

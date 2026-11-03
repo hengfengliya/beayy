@@ -15,6 +15,8 @@
       if (localStorage.getItem("side") === "collapsed") document.documentElement.dataset.side = "collapsed";
     } catch (e) {}
     if (window.__TAURI__) document.documentElement.classList.add("is-tauri");
+    // Windows 用系统标题栏，左上角没有红绿灯，侧栏顶上那组按钮不用让位置
+    if (/Windows/i.test(navigator.userAgent)) document.documentElement.classList.add("is-win");
   </script>
   <link rel="stylesheet" href="vendor/moxian/tokens.css">
   <link rel="stylesheet" href="vendor/moxian/bundle.css">

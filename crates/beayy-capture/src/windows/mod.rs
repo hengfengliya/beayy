@@ -12,6 +12,7 @@
 
 mod capture;
 mod hooks;
+mod icon;
 mod sys;
 mod uia;
 
@@ -22,6 +23,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+pub use icon::app_icon_png;
 pub use sys::idle_seconds;
 
 /// 键鼠事件的来源标记：是不是程序注入的、注入方是不是更低权限、注入方留的附加信息

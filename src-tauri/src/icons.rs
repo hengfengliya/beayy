@@ -1,8 +1,8 @@
 //! app 图标：时间线每段下面那排小图标。
-//! - 电脑：本机装了的 app 直接取图标（beayy-capture::macos::app_icon_png）。
+//! - 电脑：本机装了的 app 直接取图标（beayy-capture 的 app_icon_png；Windows 上 id 是程序路径）。
 //! - 手机：按 bundle id 查 App Store 公开接口（itunes.apple.com/lookup），顺带拿到 app 名；苹果自带的查不到，
 //!   换成 Mac 上对应的 app 取图标。
-//! 结果缓存在 `Beayy/icons/<mac|ios>/`：`<id>.png`、`<id>.name`；查不到写 `<id>.none`，以后不再查（删掉目录就会重查）。
+//! 结果缓存在 `Beayy/icons/<mac|win|ios>/`：`<id>.png`、`<id>.name`；查不到写 `<id>.none`，以后不再查（删掉目录就会重查）。
 //! 返回给网页的是 data URL，免得开放文件访问。
 
 use beayy_core::default_root;
@@ -42,7 +42,8 @@ const IOS_TO_MAC: &[(&str, &str)] = &[
 ];
 
 fn dir(phone: bool) -> PathBuf {
-    default_root().join("icons").join(if phone { "ios" } else { "mac" })
+    // Windows 0.2.44 以前取不到电脑图标、写满了 .none，换个目录重新取
+    default_root().join("icons").join(if phone { "ios" } else if cfg!(target_os = "windows") { "win" } else { "mac" })
 }
 
 fn safe(id: &str) -> String {
@@ -67,11 +68,15 @@ pub(crate) fn base64(b: &[u8]) -> String {
 
 // 手机版（mobile/）也编这个文件，它不依赖 beayy-capture
 #[cfg(all(target_os = "macos", not(beayy_mobile)))]
-fn mac_icon(id: &str) -> Option<Vec<u8>> {
+fn desktop_icon(id: &str) -> Option<Vec<u8>> {
     beayy_capture::macos::app_icon_png(id, 64)
 }
-#[cfg(not(all(target_os = "macos", not(beayy_mobile))))]
-fn mac_icon(_id: &str) -> Option<Vec<u8>> {
+#[cfg(all(target_os = "windows", not(beayy_mobile)))]
+fn desktop_icon(id: &str) -> Option<Vec<u8>> {
+    beayy_capture::windows::app_icon_png(id, 64)
+}
+#[cfg(not(any(all(target_os = "macos", not(beayy_mobile)), all(target_os = "windows", not(beayy_mobile)))))]
+fn desktop_icon(_id: &str) -> Option<Vec<u8>> {
     None
 }
 
@@ -115,10 +120,10 @@ fn one(id: &str, phone: bool) -> Value {
                 let _ = fs::write(&name, &n);
                 Some(b)
             }
-            None => IOS_TO_MAC.iter().find(|(i, _)| i.eq_ignore_ascii_case(id)).and_then(|(_, m)| mac_icon(m)).or_else(|| mac_icon(id)),
+            None => IOS_TO_MAC.iter().find(|(i, _)| i.eq_ignore_ascii_case(id)).and_then(|(_, m)| desktop_icon(m)).or_else(|| desktop_icon(id)),
         }
     } else {
-        mac_icon(id)
+        desktop_icon(id)
     };
     match got {
         Some(b) => {

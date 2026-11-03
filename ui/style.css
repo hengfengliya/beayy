@@ -38,6 +38,7 @@ body { padding: 0; overflow: hidden; }
 /* 三个按钮 28 点高，中线对齐红绿灯（Overlay 标题栏里红绿灯中心在第 16 点） */
 .win-tools { position: fixed; top: 8px; left: 12px; z-index: 6; display: flex; gap: 4px; }
 .is-tauri .win-tools { top: 2px; left: 80px; }
+.is-tauri.is-win .win-tools { top: 8px; left: 12px; }
 .win-tools .mx-iconbtn { width: 28px; height: 28px; color: var(--ink-2); }
 .win-tools .mx-iconbtn:disabled { color: var(--ink-4); opacity: .45; cursor: default; background: none; }
 .win-tools .mx-ico { width: 18px; height: 18px; }
