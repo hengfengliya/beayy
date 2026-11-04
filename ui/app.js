@@ -885,20 +885,52 @@ async function applyUpdate() {
   try { await call("update_apply"); } catch (x) { alert(tr("没更新成功：{x}", { x })); }
 }
 
-function aboutSection() {
-  const u = S.update || {}, st = S.status || {};
-  const state = u.checking ? tr("正在检查…") : u.updatable ? u.updatable : u.error ? u.error
+/** 下载进度：「正在下载 0.2.49 · 42%」 */
+const upPct = (p) => p && p.total ? ` · ${Math.min(99, Math.floor((p.done / p.total) * 100))}%` : "";
+
+/** 点了「检查更新」、还没返回：这时取到的状态可能还没开始查，按正在检查算 */
+let UP_CLICK = false;
+const upBusy = (u) => !!(UP_CLICK || u.checking || u.progress);
+
+function upState(u) {
+  return u.progress ? (upPct(u.progress) ? tr("正在下载 {v}", { v: u.latest }) + upPct(u.progress) : tr("正在下载 {v}…", { v: u.latest })) : u.checking || UP_CLICK ? tr("正在检查…") : u.updatable ? u.updatable : u.error ? u.error
     : u.newer ? (u.ready ? tr("{v} 已经下好，重启就能用。", { v: u.latest }) : tr("正在下载 {v}…", { v: u.latest }))
     : u.checked ? tr("已是最新版本（{t} 检查过）", { t: mdhm(u.checked) }) : tr("会自动检查更新");
-  const btn = u.newer && u.ready && !u.updatable ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-go">${tr("重启更新")}</button>` : `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-check" ${u.checking ? "disabled" : ""}>${tr("检查更新")}</button>`;
-  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本 {v}", { v: esc(u.current || st.version || "") })}</div><div class="mx-setting-desc">${esc(state)}</div>${u.newer && u.notes ? `<div class="mx-setting-desc">${esc(u.notes)}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
+}
+
+/** 检查、下载中：每 1.5 秒刷一下关于里那行字，完了重画设置页 */
+let UP_POLL = 0;
+function pollUpdate() {
+  clearTimeout(UP_POLL);
+  const u = S.update || {};
+  if (!TAURI || !upBusy(u)) return;
+  UP_POLL = setTimeout(async () => {
+    const el = document.getElementById("up-state");
+    if (!el) return;
+    try { S.update = await call("update_status"); } catch (e) { return; }
+    const n = S.update || {};
+    if (upBusy(n)) { el.textContent = upState(n); pollUpdate(); }
+    else { renderSide(); updatePrompt(); if (document.getElementById("up-state")) renderSettings(); }
+  }, 1500);
+}
+
+function aboutSection() {
+  const u = S.update || {}, st = S.status || {};
+  const state = upState(u);
+  const btn = u.newer && u.ready && !u.updatable ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-go">${tr("重启更新")}</button>` : `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-check" ${upBusy(u) ? "disabled" : ""}>${tr("检查更新")}</button>`;
+  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本 {v}", { v: esc(u.current || st.version || "") })}</div><div class="mx-setting-desc" id="up-state">${esc(state)}</div>${u.newer && u.notes ? `<div class="mx-setting-desc">${esc(u.notes)}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
 }
 
 function bindAbout() {
   const c = document.getElementById("up-check");
-  if (c) c.onclick = async () => { S.update = { ...(S.update || {}), checking: true }; renderSettings(); try { S.update = await call("update_check"); } catch (x) {} renderSide(); renderSettings(); };
+  if (c) c.onclick = async () => {
+    UP_CLICK = true; renderSettings();
+    try { S.update = await call("update_check"); } catch (x) {}
+    UP_CLICK = false; renderSide(); renderSettings(); updatePrompt();
+  };
   const g = document.getElementById("up-go");
   if (g) g.onclick = applyUpdate;
+  pollUpdate();
 }
 
 function renderMeMenu() {
