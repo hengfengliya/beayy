@@ -47,8 +47,17 @@ async function call(cmd, args = {}) {
     case "open_permission": case "open_data_dir": console.info(`样例模式：${cmd}`, args); return null;
     case "list_fonts": return [["PingFang SC", "苹方-简"], ["Songti SC", "宋体-简"], ["Kaiti SC", "楷体-简"], ["Hiragino Sans GB", "冬青黑体简体中文"], ["Helvetica Neue", "Helvetica Neue"], ["Avenir Next", "Avenir Next"], ["Georgia", "Georgia"], ["Menlo", "Menlo"], ["Courier New", "Courier New"], ["Times New Roman", "Times New Roman"]].map(([family, name]) => ({ family, name }));
     case "get_rules": return mockState.rules || loadMock("get_rules");
-    case "get_bills": { const all = await loadMock("get_bills"); return all[args.month] || all[Object.keys(all).sort().pop()]; }
+    case "get_bills": case "money_overview": { const all = await loadMock(cmd); return all[args.month] || all[Object.keys(all).filter((k) => k.length === 7).sort().pop()]; }
+    case "get_bill": {
+      const one = await loadMock("get_bill").catch(() => ({}));
+      if (one[args.id]) return one[args.id];
+      for (const p of Object.values(await loadMock("get_bills"))) { const b = p.items.find((x) => x.id === args.id); if (b) return { raw: {}, remembered: false, ...b }; }
+      return null;
+    }
     case "pick_bill_files": return [];
+    case "set_bill_class": case "rebuild_bills": console.info(`样例模式：${cmd}`, args); return null;
+    case "classify_bills_ai": return { asked: 0, done: 0, error: null };
+    case "generate_money_insight": return "## 钱去哪了\n\n样例模式不调模型。";
     case "get_settings": {
       const s = mockState.settings || await loadMock("get_settings");
       if (mockState.hasKey) s.has_api_key = true;
@@ -1768,23 +1777,27 @@ async function renderMonth(arg) {
   $app.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => { location.hash = `#/summary/month/${b.dataset.month}`; }));
 }
 
-// ---------- 收支：导入的微信、支付宝账单（app/src-tauri/src/bills.rs） ----------
+// ---------- 收支：导入的微信、支付宝账单，在上面看钱（app/src-tauri/src/bills.rs、money.rs；方案 报告/方案_20261104_金钱管理.md） ----------
 
-// 页签（明细、去向、导入）、收支方向、搜索、筛选（来源、分类、支付方式）、排序都只在这一页的内存里，换月不丢
-const MN = { tab: "list", dir: "out", q: "", f: { src: "", cat: "", method: "" }, sort: "time-desc", all: false, month: null, data: null };
+// 页签、方向、搜索、筛选、排序都只在这一页的内存里，换月不丢
+const MN = { tab: "overview", dir: "out", side: "merchant", q: "", qOpen: false, f: { src: "", ttype: "", ctype: "", account: "", channel: "" }, day: "", sort: "time-desc", all: false, open: null, month: null, data: null, ov: null, busy: null, err: null };
 const yuan = (f) => (f / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 /** 读数的大数字取整元（精确的放悬停） */
 const yuanRound = (f) => Math.round(f / 100).toLocaleString("en-US");
+const sharePct = (x) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 const BILL_SRC = { alipay: tr("支付宝"), wechat: tr("微信") };
-const BILL_FILTERS = [["src", tr("来源")], ["cat", tr("分类")], ["method", tr("支付方式")]];
+const BILL_BY = { manual: tr("你改的"), bill: tr("账单上的"), rule: tr("你定的"), keyword: tr("按名字认的"), ai: tr("AI 分的") };
+const BILL_FILTERS = [["src", tr("来源")], ["ttype", tr("交易类型")], ["ctype", tr("消费类型")], ["account", tr("付款账户")], ["channel", tr("渠道")]];
 const BILL_SORTS = [["time-desc", tr("时间：新的在前")], ["time-asc", tr("时间：旧的在前")], ["amt-desc", tr("金额：大的在前")], ["amt-asc", tr("金额：小的在前")]];
 const MI_SORT = lu('<path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/>');
 const MI_FILTER = '<svg class="mx-ico" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/><circle cx="5" cy="4" r="1.5" style="fill:var(--page)"/><circle cx="11" cy="8" r="1.5" style="fill:var(--page)"/><circle cx="7" cy="12" r="1.5" style="fill:var(--page)"/></svg>';
 const MI_SEARCH = '<svg class="mx-ico" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>';
 const MI_PLUS = '<svg class="mx-ico" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
-const monthLabel = (m) => (LANG === "zh" ? `${+m.slice(0, 4)} 年 ${+m.slice(5, 7)} 月` : new Date(+m.slice(0, 4), +m.slice(5, 7) - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" }));
-const billVal = (b, k) => (k === "src" ? b.src : k === "cat" ? b.category : b.method) || "";
-const billValLabel = (k, v) => (k === "src" ? BILL_SRC[v] || v : v || tr("未写"));
+const monthLabel = (m) => (m.length === 4 ? (LANG === "zh" ? `${m} 全年` : m) : LANG === "zh" ? `${+m.slice(0, 4)} 年 ${+m.slice(5, 7)} 月` : new Date(+m.slice(0, 4), +m.slice(5, 7) - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" }));
+const monthShort = (m) => (m.length === 4 ? monthLabel(m) : m.slice(0, 4) === localDay().slice(0, 4) ? (LANG === "zh" ? `${+m.slice(5)} 月` : new Date(2000, +m.slice(5) - 1, 1).toLocaleString("en-US", { month: "short" })) : monthLabel(m));
+const billVal = (b, k) => (k === "ctype" ? (b.ttype === "消费" ? b.ctype || "未分类" : "") : b[k]) || "";
+const billValLabel = (k, v) => (k === "src" ? BILL_SRC[v] || v : ["ttype", "ctype"].includes(k) ? tr(v) : v || tr("未写"));
+const billType = (b) => (b.ttype === "消费" ? (b.ctype ? tr(b.ctype) : tr("消费 · 未分类")) : tr(b.ttype));
 
 /** 怎么从微信、支付宝导出账单 */
 function billHowtoDialog() {
@@ -1814,47 +1827,84 @@ if (TAURI && window.__TAURI__.event) window.__TAURI__.event.listen("tauri://drag
   if (paths.length && S.page === "money") importBills(paths);
 });
 
-/** 一笔的详情：几项要紧的，下面是原表格这一行的全部列 */
-function billDialog(b) {
+/** 选一项的小下拉（弹层里用）：按钮写当前值，点开是选项 */
+const pickMenu = (id, cur, opts) => `<div class="pick"><button type="button" class="mx-btn mx-btn--secondary bill-pickbtn" id="${id}" aria-haspopup="menu" aria-expanded="false"><span>${esc(tr(cur))}</span>${ICON.chevD}</button>
+  <div class="mx-menu" role="menu" hidden>${opts.map((o) => `<button type="button" role="menuitemradio" aria-checked="${o === cur}" data-pv="${esc(o)}">${esc(tr(o))}${o === cur ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
+
+/** 一笔的详情：要紧的几项、改交易类型和消费类型、原表格的全部列 */
+async function billDialog(id) {
+  const b = await call("get_bill", { id });
+  if (!b) return;
+  const d = MN.data || {};
   const sign = b.dir === "out" ? "−" : b.dir === "in" ? "+" : "";
-  const facts = [[tr("时间"), b.time], [tr("金额"), `${sign}${yuan(b.fen)}`], [tr("收/支"), b.dir === "out" ? tr("支出") : b.dir === "in" ? tr("收入") : tr("不计收支")],
-    [tr("状态"), b.status], [tr("来源"), BILL_SRC[b.src] || b.src], [tr("分类"), b.category], [tr("支付方式"), b.method], [tr("已退"), b.refund_fen ? yuan(b.refund_fen) : ""]]
+  const by = (k) => (BILL_BY[k] ? `<span class="bill-by">${esc(BILL_BY[k])}</span>` : "");
+  const facts = [[tr("说明"), b.item], [tr("备注"), b.note], [tr("时间"), b.time], [tr("金额"), `${sign}${yuan(b.fen)}`], [tr("收/支"), b.dir === "out" ? tr("支出") : b.dir === "in" ? tr("收入") : tr("不计收支")], [tr("状态"), b.status],
+    [tr("来源"), BILL_SRC[b.src] || b.src], [tr("付款账户"), [b.account, b.discount].filter(Boolean).join(" · ")], [tr("渠道"), b.channel], [tr("已退"), b.refund_fen ? yuan(b.refund_fen) : ""], [tr("服务费"), b.fee ? yuan(b.fee) : ""]]
     .filter(([, v]) => v);
   const raw = Object.entries(b.raw || {});
-  openDialog({ title: b.counterparty || b.item || tr("这一笔"), cancel: tr("关闭"), body:
-    `<dl class="mx-facts bill-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
-     ${raw.length ? `<div class="mx-menu-group bill-raw-h">${tr("原表格")}</div><dl class="bill-raw">${raw.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}` });
+  const st = { ttype: b.ttype, ctype: b.ctype || "", remember: false };
+  const manual = b.ttype_by === "manual" || b.ctype_by === "manual";
+  const editor = `<div class="bill-edit">
+      <div class="mx-field"><label>${tr("交易类型")} ${by(b.ttype_by)}</label>${pickMenu("bd-t", st.ttype, d.ttypes || [st.ttype])}</div>
+      <div class="mx-field" id="bd-cf"${st.ttype === "消费" ? "" : " hidden"}><label>${tr("消费类型")} ${by(b.ctype_by)}</label>${pickMenu("bd-c", st.ctype || "未分类", ["未分类", ...(d.ctypes || [])])}</div>
+      ${b.counterparty ? `<div class="mx-row bill-remember"><span class="mx-row-main"><span class="mx-row-name">${esc(tr("以后「{who}」都这样", { who: b.counterparty }))}</span></span><button type="button" class="mx-switch" role="switch" aria-checked="${b.remembered}" id="bd-r" aria-label="${tr("以后同一个对方都这样")}"></button></div>` : ""}
+      ${manual ? `<button type="button" class="mx-btn mx-btn--text mx-btn--sm" id="bd-reset">${tr("恢复成自动认的")}</button>` : ""}
+    </div>`;
+  st.remember = !!b.remembered;
+  openDialog({ title: b.counterparty || b.item || tr("这一笔"), ok: tr("保存"), busy: tr("保存中…"), body:
+    `<dl class="mx-facts bill-facts">${facts.map(([k, v]) => `<div${k === tr("说明") || k === tr("备注") ? ' class="is-wide"' : ""}><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
+     ${b.is_refund ? "" : editor}
+     ${raw.length ? `<div class="mx-menu-group bill-raw-h">${tr("原表格")}</div><dl class="bill-raw">${raw.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}`,
+    onOpen: (el) => {
+      for (const [bid, key] of [["bd-t", "ttype"], ["bd-c", "ctype"]]) {
+        const btn = el.querySelector("#" + bid); if (!btn) continue;
+        bindPick(btn);
+        btn.parentElement.querySelector(".mx-menu").onclick = (e) => {
+          const o = e.target.closest("[data-pv]"); if (!o) return;
+          st[key] = o.dataset.pv === "未分类" ? "" : o.dataset.pv;
+          btn.querySelector("span").textContent = tr(o.dataset.pv);
+          o.parentElement.hidden = true;
+          o.parentElement.querySelectorAll("[data-pv]").forEach((x) => { x.setAttribute("aria-checked", String(x === o)); const c = x.querySelector(".mx-check"); if (c) c.remove(); });
+          o.insertAdjacentHTML("beforeend", `<span class="mx-check">${ICON.check}</span>`);
+          if (key === "ttype") el.querySelector("#bd-cf").hidden = st.ttype !== "消费";
+        };
+      }
+      const sw = el.querySelector("#bd-r");
+      if (sw) sw.onclick = () => { st.remember = !st.remember; sw.setAttribute("aria-checked", String(st.remember)); };
+      const reset = el.querySelector("#bd-reset");
+      if (reset) reset.onclick = async () => { await call("set_bill_class", { id, ttype: null, ctype: null, remember: st.remember }); closeDialog(); renderMoney(MN.month); };
+    },
+    submit: async () => {
+      if (b.is_refund) return;
+      const ttype = st.ttype !== b.ttype || b.ttype_by === "manual" ? st.ttype : null;
+      const ctype = st.ttype === "消费" && (st.ctype !== (b.ctype || "") || b.ctype_by === "manual") ? st.ctype || null : null;
+      await call("set_bill_class", { id, ttype, ctype, remember: st.remember });
+      renderMoney(MN.month);
+    } });
 }
 
-/** 一份导入的账单：表头、表尾写的（账户、起止、共几笔、合计），以及这次导入的结果 */
+/** 一份导入的账单：表头、表尾写的（账户、起止、共几笔、合计）、对账、这次导入的结果 */
 function importDialog(x) {
+  const c = x.check || null;
+  const chk = c ? `<dl class="mx-facts bill-facts">${[[tr("账单写的收入"), `${c.bill_n_in} · ${yuan(c.bill_in)}`], [tr("算出的收入"), `${c.n_in} · ${yuan(c.ours_in)}`], [tr("账单写的支出"), `${c.bill_n_out} · ${yuan(c.bill_out)}`], [tr("算出的支出"), `${c.n_out} · ${yuan(c.ours_out)}`]]
+    .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mx-num">${esc(v)}</dd></div>`).join("")}</dl>` : "";
   openDialog({ title: x.file, cancel: tr("关闭"), body:
     `<dl class="mx-facts bill-facts">${[[tr("账单"), tr(x.format)], [tr("笔数"), numText(x.rows)], [tr("新增"), numText(x.added)], [tr("更新"), numText(x.updated)],
       [tr("第一笔"), x.first], [tr("最后一笔"), x.last], [tr("导出时间"), x.export], [tr("导入时间"), x.imported_at]].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v || "—")}</dd></div>`).join("")}</dl>
+     ${c ? `<div class="mx-menu-group bill-raw-h">${c.ok ? tr("对账：对上了") : tr("对账：没对上")}</div>${chk}` : ""}
      ${x.meta && x.meta.length ? `<div class="mx-menu-group bill-raw-h">${tr("账单上写的")}</div><ul class="bill-meta">${x.meta.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}` });
 }
 
-/** 这个月里筛过的：先按搜索、来源、分类、支付方式，dir 再按收支方向（null＝不看方向） */
+/** 这段时间里筛过的：搜索、筛选、某一天；dir 是收支方向（null＝不看方向） */
 function billRows(d, dir = MN.dir) {
   const q = MN.q.trim().toLowerCase();
   return d.items.filter((b) => {
     if (dir && dir !== "all" && !(b.counted && b.dir === dir)) return false;
     for (const [k] of BILL_FILTERS) if (MN.f[k] && billVal(b, k) !== MN.f[k]) return false;
-    if (q && ![b.counterparty, b.item, b.note, b.category, b.method, b.status].some((x) => (x || "").toLowerCase().includes(q))) return false;
+    if (MN.day && !b.time.startsWith(MN.day)) return false;
+    if (q && ![b.counterparty, b.item, b.note, b.ctype, b.ttype, b.account, b.status].some((x) => (x || "").toLowerCase().includes(q))) return false;
     return true;
   });
-}
-
-function billReadouts(d) {
-  const xs = billRows(d, null).filter((b) => b.counted);
-  const out = xs.filter((b) => b.dir === "out"), inc = xs.filter((b) => b.dir === "in");
-  const spend = out.reduce((a, b) => a + b.fen - (b.refund_fen || 0), 0), refund = out.reduce((a, b) => a + (b.refund_fen || 0), 0), income = inc.reduce((a, b) => a + b.fen, 0);
-  return `<div class="readouts">
-      ${readout(tr("支出"), yuanRound(spend), tr("元"), yuan(spend), false, refund ? tr("已扣退款 {v} 元", { v: yuan(refund) }) : "")}
-      ${readout(tr("收入"), yuanRound(income), tr("元"), yuan(income))}
-      ${readout(tr("结余"), (income < spend ? "−" : "") + yuanRound(Math.abs(income - spend)), tr("元"), yuan(income - spend))}
-      ${readout(tr("笔数"), numText(xs.length), tr("笔"), "", false, tr("不含不计收支、退款"))}
-    </div>`;
 }
 
 function billAmount(b) {
@@ -1864,44 +1914,157 @@ function billAmount(b) {
   return `<td class="is-num${full ? " bill-void" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${sign}${yuan(b.fen)}${part ? `<small>${esc(tr("退 {v}", { v: yuan(b.refund_fen) }))}</small>` : ""}</td>`;
 }
 
+const billMore = (n, shown, unit) => (n > shown ? `<button class="mx-btn mx-btn--secondary mx-btn--sm bills-more" data-more="1">${tr(unit, { n })}</button>` : "");
+
+// ---------- 概览 ----------
+
+/** 近 12 个月的消费：每月一根柱（转账这类大额会把消费压扁，只画消费；支出、收入在悬停里），有账单以前的月份不画；点一根换到那个月 */
+function trendChart(ov) {
+  const first = ov.months[ov.months.length - 1] || "";
+  const t = ov.trend.filter((x) => x.month >= first), W = 720, H = 156, top = 14, bot = 22, gap = 14;
+  // 一两个月的大额会把别的月压扁：纵轴最高取有数据月份中位数的 3 倍，超出的顶格画、顶上写实际金额
+  const vals = t.map((x) => x.consume).filter((v) => v > 0).sort((a, b) => a - b);
+  const real = Math.max(1, ...t.map((x) => x.consume)), mid = vals.length ? vals[Math.floor(vals.length / 2)] : 1;
+  const max = vals.length >= 4 && real > mid * 3 ? mid * 3 : real;
+  const slots = Math.max(t.length, 6), bw = (W - gap * (slots - 1)) / slots, h = (v) => (Math.min(v, max) / max) * (H - top - bot);
+  const bars = t.map((x, i) => {
+    const x0 = i * (bw + gap), hh2 = x.consume ? Math.max(2, h(x.consume)) : 0, cut = x.consume > max;
+    const tip = `${monthLabel(x.month)}\n${tr("消费")} ${yuan(x.consume)}\n${tr("支出")} ${yuan(x.out)}\n${tr("收入")} ${yuan(x.income)}`;
+    return `<g class="tr-m${x.month === ov.period ? " is-on" : ""}" ${x.has ? `data-month="${x.month}"` : ""}><title>${esc(tip)}</title>
+      <rect class="tr-hit" x="${x0 - gap / 2}" y="0" width="${bw + gap}" height="${H}"/>
+      ${hh2 ? `<rect class="tr-c" x="${x0}" y="${H - bot - hh2}" width="${bw}" height="${hh2}" rx="2"/>` : ""}
+      ${cut ? `<path class="tr-cut" d="M${x0 - 2} ${top + 6} l${bw / 2 + 2} -5 l${bw / 2 + 2} 5"/><text class="tr-v" x="${x0 + bw / 2}" y="${top - 2}">${yuanRound(x.consume)}</text>` : ""}
+      <text class="tr-l" x="${x0 + bw / 2}" y="${H - 6}">${+x.month.slice(5)}</text></g>`;
+  }).join("");
+  return `<div class="bill-trend"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${tr("近 12 个月的消费")}">${bars}</svg></div>`;
+}
+
+/** 这个月每天的消费：一天一格，越深越多；点一格看那天的明细 */
+function dayCells(ov) {
+  const m = ov.period, n = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+  const by = Object.fromEntries(ov.days.map((x) => [x.date, x]));
+  const max = Math.max(1, ...ov.days.map((x) => x.consume));
+  const cells = Array.from({ length: n }, (_, i) => {
+    const date = `${m}-${pad2(i + 1)}`, x = by[date], v = x ? x.consume : 0;
+    if (ov.upto && date > ov.upto) return `<span class="bill-day is-later"><span>${i + 1}</span></span>`;
+    const a = v ? 0.12 + 0.88 * Math.sqrt(v / max) : 0;
+    return `<button class="bill-day${v ? "" : " is-zero"}" data-day="${date}" style="--a:${a.toFixed(2)}" title="${esc(`${date.slice(5)} ${weekday(date)}\n${tr("消费")} ${yuan(v)}${x && x.out !== v ? `\n${tr("支出")} ${yuan(x.out)}` : ""}`)}"><span>${i + 1}</span></button>`;
+  }).join("");
+  return `<div class="bill-days">${cells}</div>`;
+}
+
+const billBar = (share) => `<span class="bill-bar"><i style="width:${Math.max(0, Math.min(100, share * 100)).toFixed(1)}%"></i></span>`;
+/** 和前三个月平均比：翻倍以上写倍数（×3.6），否则 +62%／−22% */
+const billVs = (x) => {
+  if (x.change == null) return x.avg3 === 0 ? `<span class="bill-new">${tr("新")}</span>` : "—";
+  const r = x.change + 1, text = r >= 2 ? `×${r >= 10 ? Math.round(r) : r.toFixed(1)}` : `${x.change >= 0 ? "+" : "−"}${Math.round(Math.abs(x.change) * 100)}%`;
+  return `<span class="${x.change > 0.5 ? "bill-up" : ""}">${text}</span>`;
+};
+
+function overviewBody(ov) {
+  const t = ov.totals, p = ov.prev;
+  const ro = `<div class="readouts">
+      ${readout(tr("支出"), yuanRound(t.out), tr("元"), yuan(t.out), false, [...ov.by_ttype.filter((x) => x.out).map((x) => `${tr(x.name)} ${yuan(x.out)}`), t.refund ? tr("已扣退款 {v} 元", { v: yuan(t.refund) }) : ""].filter(Boolean).join("\n"))}
+      ${readout(tr("消费"), yuanRound(t.consume), tr("元"), yuan(t.consume), false, p ? (ov.upto ? tr("前三个月同期平均 {v} 元", { v: yuan(p.consume) }) : tr("前三个月平均 {v} 元", { v: yuan(p.consume) })) : "")}
+      ${readout(tr("收入"), yuanRound(t.in), tr("元"), yuan(t.in))}
+      ${readout(tr("结余"), (t.net < 0 ? "−" : "") + yuanRound(Math.abs(t.net)), tr("元"), yuan(t.net))}
+      ${readout(tr("储蓄率"), t.rate == null ? "—" : Math.round(t.rate * 100), "%", "", false, tr("结余 ÷ 收入"))}
+    </div>`;
+  const ins = ov.is_month ? section(tr("这个月的钱"), ov.insight
+      ? `<div class="story bill-insight">${md(ov.insight)}</div><p class="sum-foot"><button class="mx-btn mx-btn--text mx-btn--sm" id="ins-gen">${MN.busy === "insight" ? tr("在写…") : tr("重新写")}</button></p>`
+      : `<div class="bill-insight-empty"><span>${tr("还没有这个月的总结")}</span><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ins-gen"${MN.busy === "insight" ? " disabled" : ""}>${MN.busy === "insight" ? tr("在写…") : tr("现在写")}</button></div>`)
+      + (MN.err ? `<p class="bill-err">${esc(MN.err)}</p>` : "") : "";
+  const alerts = ov.alerts.length ? section(tr("值得注意的"), `<div class="bill-alerts">${ov.alerts.map((a, i) =>
+    `<button class="bill-alert" data-alert="${i}"><span class="mx-status${a.level === "warn" ? " mx-status--warn" : ""}"></span><span>${esc(a.text)}</span>${a.action === "classify" ? `<span class="bill-alert-act">${MN.busy === "classify" ? tr("在分…") : tr("让 AI 分类")}</span>` : ""}</button>`).join("")}</div>`) : "";
+  const trend = section(tr("近 12 个月的消费"), trendChart(ov));
+  const days = ov.is_month && ov.days.length ? section(tr("每天的消费"), dayCells(ov)) : "";
+  const tt = ov.by_ttype.length ? section(tr("钱怎么动的"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("交易类型")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("支出")}</th><th class="is-num">${tr("收入")}</th></tr></thead><tbody>
+      ${ov.by_ttype.map((x) => `<tr data-ttype="${esc(x.name)}"><td>${esc(tr(x.name))}</td><td class="is-num">${x.n}</td><td class="is-num">${x.out ? yuan(x.out) : "—"}</td><td class="is-num">${x.in ? yuan(x.in) : "—"}</td></tr>`).join("")}</tbody></table></div>`) : "";
+  const ct = ov.by_ctype.length ? section(tr("消费花在哪"), ctypeTable(ov, false)) : "";
+  const ac = ov.accounts.length ? section(tr("从哪个账户付的"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("付款账户")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>
+      ${ov.accounts.map((x) => `<tr data-account="${esc(x.name)}"><td>${esc(x.name)}${x.credit ? `<span class="mx-tag">${tr("信用")}</span>` : ""}</td><td class="is-num">${x.n}</td><td class="is-num">${yuan(x.fen)}</td></tr>`).join("")}</tbody></table></div>`,
+      { aside: ov.credit != null ? esc(tr("消费里信用付的占 {v}", { v: sharePct(ov.credit) })) : "" }) : "";
+  const rc = ov.recurring.length ? section(tr("每月固定扣费"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("对方")}</th><th class="is-num">${tr("月数")}</th><th class="is-num">${tr("每月约")}</th><th class="is-num">${tr("最近一个月")}</th></tr></thead><tbody>
+      ${ov.recurring.map((x) => `<tr data-who="${esc(x.name)}"><td title="${esc(x.name)}">${esc(x.name)}${x.new ? `<span class="mx-tag">${tr("新")}</span>` : ""}${x.rise ? `<span class="mx-tag bill-tag-up">${tr("涨了")}</span>` : ""}</td><td class="is-num">${x.months}</td><td class="is-num">${yuan(x.avg)}</td><td class="is-num">${yuan(x.last)}</td></tr>`).join("")}</tbody></table></div>`) : "";
+  const bg = ov.budgets.length ? section(tr("预算"), `<div class="bill-budgets">${ov.budgets.map((x) => `<div class="bill-budget"><span>${esc(x.text)}</span>${billBar(x.spent / x.limit)}<span class="mx-num${x.ok ? "" : " bill-up"}">${yuan(x.spent)} / ${yuan(x.limit)}</span></div>`).join("")}</div>`) : "";
+  return ro + `<div class="secs-plain" style="margin-top:var(--space-6)">${ins}${alerts}${trend}${days}${tt}${ct}${ac}${rc}${bg}</div>`;
+}
+
+/** 消费类型那张表（概览、分类页共用）；分类页点一行展开近 12 个月和主要商户 */
+function ctypeTable(ov, expand) {
+  const rows = ov.by_ctype.map((x) => {
+    const name = x.name || "未分类", open = expand && MN.open === name;
+    let detail = "";
+    if (open) {
+      const mx = Math.max(1, ...x.series);
+      const spark = `<div class="bill-spark">${x.series.map((v, i) => `<i style="height:${Math.max(2, (v / mx) * 44)}px" title="${esc(`${monthLabel(ov.trend[i].month)} ${yuan(v)}`)}"></i>`).join("")}</div>`;
+      const m = new Map();
+      for (const b of (MN.data ? MN.data.items : []).filter((b) => b.counted && b.ttype === "消费" && (b.ctype || "未分类") === name)) {
+        const w = b.counterparty || b.item; const e = m.get(w) || [0, 0]; e[0] += b.fen - (b.refund_fen || 0); e[1] += 1; m.set(w, e);
+      }
+      const top = [...m.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, 6);
+      detail = `<tr class="bill-open"><td colspan="5"><div class="bill-open-in">${spark}<div class="bill-open-top">${top.map(([w, [f, n]]) => `<button data-who="${esc(w)}"><span>${esc(w)}</span><span class="mx-num">${n} · ${yuan(f)}</span></button>`).join("")}
+        <button class="mx-btn mx-btn--text mx-btn--sm" data-ctype-list="${esc(name)}">${tr("看这类的明细")}</button></div></div></td></tr>`;
+    }
+    return `<tr data-ctype="${esc(name)}"${open ? ' class="is-open"' : ""}><td>${esc(tr(name))}</td><td class="bill-bar-td">${billBar(x.share)}</td><td class="is-num">${sharePct(x.share)}</td><td class="is-num">${ov.is_month ? billVs(x) : x.n}</td><td class="is-num">${yuan(x.fen)}</td></tr>${detail}`;
+  }).join("");
+  return `<div class="mx-table-wrap"><table class="mx-table bills-ct"><thead><tr><th>${tr("消费类型")}</th><th class="b-bar"></th><th class="is-num">${tr("占比")}</th><th class="is-num"${ov.upto ? ` title="${esc(tr("每月 1 日到 {d} 日", { d: +ov.upto.slice(8) }))}"` : ""}>${ov.is_month ? (ov.upto ? tr("比前三个月同期") : tr("比前三个月")) : tr("笔数")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// ---------- 明细、分类、对方、导入 ----------
+
 function billListBody(d) {
   const rows = billRows(d);
   const [k, way] = MN.sort.split("-"), w = way === "asc" ? 1 : -1;
-  rows.sort((a, b) => (k === "amt" ? (a.fen - b.fen) * w || a.time.localeCompare(b.time) * -1 : a.time.localeCompare(b.time) * w));
+  rows.sort((a, b) => (k === "amt" ? (a.fen - b.fen) * w || b.time.localeCompare(a.time) : a.time.localeCompare(b.time) * w));
   const shown = MN.all ? rows : rows.slice(0, 100);
+  const xs = billRows(d, null).filter((b) => b.counted);
+  const out = xs.filter((b) => b.dir === "out").reduce((a, b) => a + b.fen - (b.refund_fen || 0), 0), inc = xs.filter((b) => b.dir === "in").reduce((a, b) => a + b.fen, 0);
+  const sum = `${tr("支出 {a} · 收入 {b} · {n} 笔", { a: yuan(out), b: yuan(inc), n: rows.length })}`;
+  const table = rows.length ? `<div class="mx-table-wrap"><table class="mx-table bills"><thead><tr><th class="b-time">${tr("时间")}</th><th>${tr("对方")}</th><th>${tr("说明")}</th><th class="b-cat">${tr("类型")}</th><th class="b-method">${tr("付款账户")}</th><th class="b-src">${tr("来源")}</th><th class="is-num b-amt">${tr("金额")}</th></tr></thead><tbody>
+      ${shown.map((b) => `<tr data-bill="${esc(b.id)}"${b.counted ? "" : ' class="bill-muted"'}><td class="mx-num">${esc(b.time.slice(5, 16))}</td><td title="${esc(b.counterparty)}">${esc(b.counterparty)}</td><td title="${esc(b.item)}">${esc(b.item)}</td><td class="${b.ttype === "消费" && !b.ctype ? "bill-dim" : ""}" title="${esc(BILL_BY[b.ctype_by] || BILL_BY[b.ttype_by] || "")}">${esc(billType(b))}</td><td title="${esc(b.account)}">${esc(b.account)}</td><td>${esc(BILL_SRC[b.src] || b.src)}</td>${billAmount(b)}</tr>`).join("")}</tbody></table></div>
+      ${billMore(rows.length, shown.length, "显示全部 {n} 笔")}`
+    : emptyInline(MN.q || MN.day || Object.values(MN.f).some(Boolean) ? tr("没有符合条件的") : tr("这段时间没有记录"));
   const cover = Object.entries(d.coverage).map(([s, c]) => tr("{src}至 {d}", { src: BILL_SRC[s] || s, d: c.last.slice(0, 10) })).join(" · ");
-  const table = rows.length ? `<div class="mx-table-wrap"><table class="mx-table bills"><thead><tr><th class="b-time">${tr("时间")}</th><th>${tr("对方")}</th><th>${tr("说明")}</th><th class="b-cat">${tr("分类")}</th><th class="b-method">${tr("支付方式")}</th><th class="b-src">${tr("来源")}</th><th class="is-num b-amt">${tr("金额")}</th></tr></thead><tbody>
-      ${shown.map((b) => `<tr data-bill="${esc(b.id)}"${b.counted ? "" : ' class="bill-muted"'}><td class="mx-num">${esc(b.time.slice(5, 16))}</td><td title="${esc(b.counterparty)}">${esc(b.counterparty)}</td><td title="${esc(b.item)}">${esc(b.item)}</td><td>${esc(b.category)}</td><td title="${esc(b.method)}">${esc(b.method)}</td><td>${esc(BILL_SRC[b.src] || b.src)}</td>${billAmount(b)}</tr>`).join("")}</tbody></table></div>
-      ${rows.length > shown.length ? `<button class="mx-btn mx-btn--secondary mx-btn--sm bills-more" id="bill-more">${tr("显示全部 {n} 笔", { n: rows.length })}</button>` : ""}`
-    : emptyInline(MN.q || Object.values(MN.f).some(Boolean) ? tr("没有符合条件的") : tr("这个月没有记录"));
-  return billReadouts(d) + `<div class="secs-plain" style="margin-top:var(--space-6)">${section(tr("明细"), table, { aside: esc(cover) })}</div>`;
+  return `<p class="bill-sum mx-num">${esc(sum)}</p>` + section(tr("明细"), table, { aside: esc(cover) });
 }
 
-function billToBody(d) {
-  const dir = MN.dir === "in" ? "in" : "out";
+function billCtypeBody(ov, d) {
+  const n = d.unclassified;
+  const notice = n ? `<div class="mx-notice"><span>${esc(tr("还有 {n} 笔消费没分好类", { n }))}</span><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ai-cls" title="${tr("只发对方名和说明")}"${MN.busy === "classify" ? " disabled" : ""}>${MN.busy === "classify" ? tr("在分…") : tr("让 AI 分类")}</button></div>` : "";
+  return notice + (MN.err ? `<p class="bill-err">${esc(MN.err)}</p>` : "") + (ov.by_ctype.length ? section(tr("消费花在哪"), ctypeTable(ov, true)) : emptyInline(tr("这段时间没有消费")));
+}
+
+function billWhoBody(d) {
+  const people = MN.side === "person";
   const m = new Map();
-  for (const b of billRows(d, dir)) {
-    const who = b.counterparty || b.item || tr("未写对方");
-    const x = m.get(who) || { name: who, fen: 0, n: 0 };
-    x.fen += b.fen - (dir === "out" ? b.refund_fen || 0 : 0); x.n += 1; m.set(who, x);
+  for (const b of billRows(d, null).filter((b) => b.counted && (people ? ["转账", "红包", "亲友代付"].includes(b.ttype) : b.ttype === "消费"))) {
+    const w = b.who || b.counterparty || b.item || tr("未写对方");
+    const e = m.get(w) || { name: w, out: 0, in: 0, n: 0, ct: new Map(), last: "" };
+    e.out += b.dir === "out" ? b.fen - (b.refund_fen || 0) : 0; e.in += b.dir === "in" ? b.fen : 0; e.n += 1; e.last = e.last > b.time ? e.last : b.time;
+    if (b.ctype) e.ct.set(b.ctype, (e.ct.get(b.ctype) || 0) + 1);
+    m.set(w, e);
   }
-  const rows = [...m.values()].filter((x) => x.fen > 0).sort((a, b) => b.fen - a.fen);
-  const total = rows.reduce((a, x) => a + x.fen, 0);
+  const rows = [...m.values()].sort((a, b) => b.out + b.in - (a.out + a.in));
   const shown = MN.all ? rows : rows.slice(0, 50);
-  const table = rows.length ? `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("对方")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("占比")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>
-      ${shown.map((t) => `<tr data-who="${esc(t.name)}"><td title="${esc(t.name)}">${esc(t.name)}</td><td class="is-num">${t.n}</td><td class="is-num">${Math.round((t.fen / total) * 100)}%</td><td class="is-num">${yuan(t.fen)}</td></tr>`).join("")}</tbody></table></div>
-      ${rows.length > shown.length ? `<button class="mx-btn mx-btn--secondary mx-btn--sm bills-more" id="bill-more">${tr("显示全部 {n} 个", { n: rows.length })}</button>` : ""}`
-    : emptyInline(tr("没有符合条件的"));
-  return billReadouts(d) + `<div class="secs-plain" style="margin-top:var(--space-6)">${section(dir === "in" ? tr("来自") : tr("去向"), table)}</div>`;
+  if (!rows.length) return emptyInline(tr("没有符合条件的"));
+  const head = people ? `<th>${tr("对方")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("给出")}</th><th class="is-num">${tr("收到")}</th><th class="is-num">${tr("净额")}</th>`
+    : `<th>${tr("对方")}</th><th class="b-cat">${tr("消费类型")}</th><th class="is-num">${tr("笔数")}</th><th class="b-time">${tr("最近")}</th><th class="is-num">${tr("金额")}</th>`;
+  const row = (x) => people
+    ? `<tr data-who="${esc(x.name)}"><td title="${esc(x.name)}">${esc(x.name)}</td><td class="is-num">${x.n}</td><td class="is-num">${x.out ? yuan(x.out) : "—"}</td><td class="is-num">${x.in ? yuan(x.in) : "—"}</td><td class="is-num">${(x.in - x.out < 0 ? "−" : "+") + yuan(Math.abs(x.in - x.out))}</td></tr>`
+    : `<tr data-who="${esc(x.name)}"><td title="${esc(x.name)}">${esc(x.name)}</td><td>${esc(tr([...x.ct.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0])[0] || "未分类"))}</td><td class="is-num">${x.n}</td><td class="mx-num">${esc(x.last.slice(5, 10))}</td><td class="is-num">${yuan(x.out)}</td></tr>`;
+  return section(people ? tr("和人的来往") : tr("商户"), `<div class="mx-table-wrap"><table class="mx-table bills-who"><thead><tr>${head}</tr></thead><tbody>${shown.map(row).join("")}</tbody></table></div>${billMore(rows.length, shown.length, "显示全部 {n} 个")}`);
 }
 
 function billImportsBody(d) {
   const xs = d.imports || [];
   const cover = Object.entries(d.coverage).map(([s, c]) => `<div><dt>${esc(BILL_SRC[s] || s)}</dt><dd>${esc(tr("{a}–{b} · {n} 笔", { a: c.first.slice(0, 10), b: c.last.slice(0, 10), n: numText(c.count) }))}</dd></div>`).join("");
-  const table = xs.length ? `<div class="mx-table-wrap"><table class="mx-table bill-imports"><thead><tr><th>${tr("文件")}</th><th class="b-fmt">${tr("账单")}</th><th class="b-range">${tr("账单里的时间")}</th><th class="is-num b-n">${tr("笔数")}</th><th class="b-at">${tr("导入时间")}</th></tr></thead><tbody>
-      ${xs.map((x, i) => `<tr data-imp="${i}"><td title="${esc(x.file)}">${esc(x.file)}</td><td>${esc(tr(x.format))}</td><td class="mx-num">${esc(x.first.slice(0, 10))}–${esc(x.last.slice(0, 10))}</td><td class="is-num">${numText(x.rows)}</td><td class="mx-num">${esc(x.imported_at.slice(0, 16))}</td></tr>`).join("")}</tbody></table></div>`
+  const ok = (x) => !x.check || x.check.ok == null ? "—" : x.check.ok ? `<span class="mx-status mx-status--ok">${tr("对上了")}</span>` : `<span class="mx-status mx-status--warn">${esc(tr("差 {v} 元", { v: yuan(Math.abs(x.check.bill_out - x.check.ours_out) + Math.abs(x.check.bill_in - x.check.ours_in)) }))}</span>`;
+  const table = xs.length ? `<div class="mx-table-wrap"><table class="mx-table bill-imports"><thead><tr><th>${tr("账单")}</th><th class="b-range">${tr("账单里的时间")}</th><th class="is-num b-n">${tr("笔数")}</th><th class="b-chk">${tr("对账")}</th><th class="b-at">${tr("导入时间")}</th></tr></thead><tbody>
+      ${xs.map((x, i) => `<tr data-imp="${i}"><td title="${esc(x.file)}">${esc(tr(x.format))}</td><td class="mx-num">${esc(x.first.slice(0, 10))}–${esc(x.last.slice(0, 10))}</td><td class="is-num">${numText(x.rows)}</td><td>${ok(x)}</td><td class="mx-num">${esc(x.imported_at.slice(0, 16))}</td></tr>`).join("")}</tbody></table></div>`
     : emptyInline(tr("之前导入的没有记下文件，再导一次就有"));
-  return `${cover ? `<dl class="mx-facts bill-cover">${cover}</dl>` : ""}<div class="secs-plain" style="margin-top:var(--space-6)">${section(tr("导入过的账单"), table, { aside: howto("bills", tr("怎么导出账单")) })}</div>`;
+  const rebuild = xs.some((x) => x.stored) ? `<button class="mx-btn mx-btn--text mx-btn--sm" id="bill-rebuild"${MN.busy === "rebuild" ? " disabled" : ""}>${MN.busy === "rebuild" ? tr("在重算…") : tr("从原文件重算")}</button>` : "";
+  return `${cover ? `<dl class="mx-facts bill-cover">${cover}</dl>` : ""}<div class="secs-plain" style="margin-top:var(--space-6)">${section(tr("导入过的账单"), table + `<p class="sum-foot">${rebuild}${howto("bills", tr("怎么导出账单"))}</p>`)}</div>`;
 }
 
 /** 筛选菜单：第一层一行一个维度（右边灰字是当前值），点进去是这个维度的选项 */
@@ -1921,86 +2084,122 @@ function billFilterMenu(d, dim) {
 
 /** 只重画正文（搜索、筛选、排序、换方向时），工具栏和搜索框的焦点不动 */
 function drawBillBody() {
-  const d = MN.data; if (!d) return;
+  const d = MN.data, ov = MN.ov; if (!d) return;
   const body = document.getElementById("bill-body"); if (!body) return;
-  body.innerHTML = MN.tab === "to" ? billToBody(d) : MN.tab === "imports" ? billImportsBody(d) : billListBody(d);
+  body.innerHTML = MN.tab === "overview" ? overviewBody(ov) : MN.tab === "ctype" ? billCtypeBody(ov, d) : MN.tab === "who" ? billWhoBody(d) : MN.tab === "imports" ? billImportsBody(d) : billListBody(d);
   const n = BILL_FILTERS.filter(([k]) => MN.f[k]).length;
   const badge = document.querySelector("#bill-filter .mx-badge");
   if (badge) { badge.textContent = n; badge.hidden = !n; }
   const chips = document.getElementById("bill-chips");
   if (chips) {
-    const on = MN.tab !== "imports" ? BILL_FILTERS.filter(([k]) => MN.f[k]) : [];
+    const on = ["list", "who"].includes(MN.tab) ? BILL_FILTERS.filter(([k]) => MN.f[k]).map(([k, name]) => [k, `${name}：${billValLabel(k, MN.f[k])}`]) : [];
+    if (MN.day && ["list", "who"].includes(MN.tab)) on.unshift(["day", `${MN.day.slice(5)} ${weekday(MN.day)}`]);
     chips.hidden = !on.length;
-    chips.innerHTML = on.map(([k, name]) => `<button class="mx-chip" data-chip="${k}" title="${tr("去掉")}">${esc(name)}：${esc(billValLabel(k, MN.f[k]))}${ICON.close}</button>`).join("");
+    chips.innerHTML = on.map(([k, text]) => `<button class="mx-chip" data-chip="${k}" title="${tr("去掉")}">${esc(text)}${ICON.close}</button>`).join("");
   }
-  const more = document.getElementById("bill-more");
-  if (more) more.onclick = () => { MN.all = true; drawBillBody(); };
+}
+
+/** 跳到明细，带上条件 */
+function billGo(cond) {
+  MN.tab = "list"; MN.all = false; MN.day = cond.day || ""; MN.q = cond.q || ""; MN.qOpen = !!MN.q;
+  MN.f = { src: "", ttype: cond.ttype || "", ctype: cond.ctype || "", account: cond.account || "", channel: "" };
+  if (cond.ttype || cond.ctype || cond.account) MN.dir = "all";
+  renderMoney(MN.month);
+}
+
+async function billRun(kind, cmd, args = {}) {
+  MN.busy = kind; MN.err = null; drawBillBody();
+  try {
+    const r = await call(cmd, args);
+    if (r && r.error) MN.err = r.error;
+    if (r && r.errors && r.errors.length) MN.err = r.errors.join("；");
+  } catch (e) { MN.err = String(e && e.message ? e.message : e); }
+  MN.busy = null;
+  renderMoney(MN.month);
 }
 
 async function renderMoney(arg) {
   const tk = RT.seq;
-  const d = await call("get_bills", { month: /^\d{4}-\d{2}$/.test(arg || "") ? arg : MN.month });
-  MN.month = d.month; MN.data = d;
+  const want = /^\d{4}(-\d{2})?$/.test(arg || "") ? arg : MN.month;
+  const [d, ov] = await Promise.all([call("get_bills", { month: want || null }), call("money_overview", { month: want || null })]);
+  if (stale(tk)) return;
+  MN.month = d.month; MN.data = d; MN.ov = ov;
   const has = Object.keys(d.coverage || {}).length > 0;
-  const addMenu = `<div class="pick bill-add"><button class="mx-btn mx-btn--primary" id="bill-add" aria-haspopup="menu" aria-expanded="false">${MI_PLUS}${tr("导入账单")}${ICON.chevD}</button>
-      <div class="mx-menu" role="menu" hidden><button role="menuitem" data-add="pick">${tr("选择文件…")}</button><button role="menuitem" data-add="howto">${tr("怎么导出账单")}</button></div></div>`;
   if (!has) {
-    if (stale(tk)) return; $app.innerHTML = header(tr("收支")) + `<div class="reading">${emptyBlock("notebook", tr("导入微信、支付宝的账单，看每个月花在哪"), `<div class="empty-acts"><button class="mx-btn mx-btn--primary" id="bill-import">${tr("导入账单")}</button>${howto("bills", tr("怎么导出账单"))}</div>`)}</div>`;
+    $app.innerHTML = header(tr("收支")) + `<div class="reading">${emptyBlock("notebook", tr("导入微信、支付宝的账单，看每个月花在哪"), `<div class="empty-acts"><button class="mx-btn mx-btn--primary" id="bill-import">${tr("导入账单")}</button>${howto("bills", tr("怎么导出账单"))}</div>`)}</div>`;
     document.getElementById("bill-import").onclick = pickBills;
     return;
   }
-  const months = [...new Set([localDay().slice(0, 7), ...d.months])].sort().reverse();
-  const imp = MN.tab === "imports";
-  const tabs = `<div class="tabs" role="tablist" id="bill-tabs">${[["list", tr("明细")], ["to", tr("去向")], ["imports", tr("导入")]].map(([k, v]) =>
-    `<button role="tab" aria-selected="${k === MN.tab}" class="${k === MN.tab ? "is-on" : ""}" data-btab="${k}">${v}</button>`).join("")}</div>`;
-  const seg = `<div class="mx-seg" role="tablist" id="bill-dir">${[["out", tr("支出")], ["in", tr("收入")], ["all", tr("全部")]].map(([k, v]) =>
-    `<button role="tab" aria-selected="${k === MN.dir}" class="${k === MN.dir ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
-  // 看哪个月：下拉（今年的只写月份），列有账单的月份
-  const thisYear = localDay().slice(0, 4);
-  const monthNav = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="bill-month" aria-haspopup="menu" aria-expanded="false" title="${esc(monthLabel(d.month))}">${d.month.slice(0, 4) === thisYear ? (LANG === "zh" ? `${+d.month.slice(5)} 月` : new Date(2000, +d.month.slice(5) - 1, 1).toLocaleString("en-US", { month: "short" })) : monthLabel(d.month)}${ICON.chevD}</button>
-      <div class="mx-menu" role="menu" hidden>${months.map((m) => `<button role="menuitemradio" aria-checked="${m === d.month}" data-month="${m}">${monthLabel(m)}${m === d.month ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
-  const search = `<label class="mx-search bill-search">${MI_SEARCH}<input id="bill-q" placeholder="${tr("搜索对方、说明、备注")}" value="${esc(MN.q)}"></label>`;
+  const tab = MN.tab;
+  const periods = [];
+  for (const y of d.years) { periods.push(y); for (const m of d.months.filter((m) => m.startsWith(y))) periods.push(m); }
+  const tabs = `<div class="tabs" role="tablist" id="bill-tabs">${[["overview", tr("概览")], ["list", tr("明细")], ["ctype", tr("分类")], ["who", tr("对方")], ["imports", tr("导入")]].map(([k, v]) =>
+    `<button role="tab" aria-selected="${k === tab}" class="${k === tab ? "is-on" : ""}" data-btab="${k}">${v}</button>`).join("")}</div>`;
+  const segOf = (id, items, cur) => `<div class="mx-seg" role="tablist" id="${id}">${items.map(([k, v]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
+  const seg = tab === "list" ? segOf("bill-dir", [["out", tr("支出")], ["in", tr("收入")], ["all", tr("全部")]], MN.dir) : tab === "who" ? segOf("bill-side", [["merchant", tr("商户")], ["person", tr("个人")]], MN.side) : "";
+  const period = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="bill-month" aria-haspopup="menu" aria-expanded="false" title="${esc(monthLabel(d.month))}">${esc(monthShort(d.month))}${ICON.chevD}</button>
+      <div class="mx-menu" role="menu" hidden>${periods.map((m) => `<button role="menuitemradio" aria-checked="${m === d.month}" data-month="${m}"${m.length === 4 ? ' class="bill-year"' : ""}>${esc(monthLabel(m))}${m === d.month ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
+  const search = MN.qOpen || MN.q ? `<label class="mx-search bill-search">${MI_SEARCH}<input id="bill-q" placeholder="${tr("搜索对方、说明、备注")}" value="${esc(MN.q)}"></label>`
+    : `<button class="mx-iconbtn" id="bill-qbtn" aria-label="${tr("搜索")}" title="${tr("搜索")}">${MI_SEARCH}</button>`;
   const filter = `<div class="pick"><button class="mx-iconbtn" id="bill-filter" aria-label="${tr("筛选")}" title="${tr("筛选")}" aria-haspopup="menu" aria-expanded="false">${MI_FILTER}<span class="mx-badge" hidden></span></button><div class="mx-menu" role="menu" id="bill-fmenu" hidden></div></div>`;
-  const sort = MN.tab === "list" ? `<div class="pick"><button class="mx-iconbtn" id="bill-sort" aria-label="${tr("排序")}" title="${tr("排序")}" aria-haspopup="menu" aria-expanded="false">${MI_SORT}</button>
-      <div class="mx-menu" role="menu" hidden>${BILL_SORTS.map(([k, v]) => `<button role="menuitemradio" aria-checked="${k === MN.sort}" data-sort="${k}">${v}${k === MN.sort ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>` : "";
-  const toolbar = `<div class="toolbar bill-toolbar"><div class="toolbar-left">${tabs}${imp ? "" : `<span class="tb-sep"></span>${seg}`}</div>
-    <div class="toolbar-right">${imp ? "" : monthNav + search + filter + sort}${addMenu}</div></div>`;
-  if (stale(tk)) return; $app.innerHTML = header(tr("收支")) + `<div id="money">${toolbar}<div class="mx-chips bill-chips" id="bill-chips" hidden></div><div class="reading" id="bill-body"></div></div>`;
+  const sort = `<div class="pick"><button class="mx-iconbtn" id="bill-sort" aria-label="${tr("排序")}" title="${tr("排序")}" aria-haspopup="menu" aria-expanded="false">${MI_SORT}</button>
+      <div class="mx-menu" role="menu" hidden>${BILL_SORTS.map(([k, v]) => `<button role="menuitemradio" aria-checked="${k === MN.sort}" data-sort="${k}">${v}${k === MN.sort ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
+  const addMenu = `<div class="pick bill-add"><button class="mx-btn mx-btn--primary" id="bill-add" aria-haspopup="menu" aria-expanded="false">${MI_PLUS}${tr("导入账单")}${ICON.chevD}</button>
+      <div class="mx-menu" role="menu" hidden><button role="menuitem" data-add="pick">${tr("选择文件…")}</button><button role="menuitem" data-add="howto">${tr("怎么导出账单")}</button></div></div>`;
+  const right = (tab === "imports" ? "" : period) + (["list", "who"].includes(tab) ? search : "") + (tab === "list" ? filter + sort : "") + addMenu;
+  $app.innerHTML = header(tr("收支")) + `<div id="money"><div class="toolbar bill-toolbar"><div class="toolbar-left">${tabs}${seg ? `<span class="tb-sep"></span>${seg}` : ""}</div><div class="toolbar-right">${right}</div></div>
+    <div class="mx-chips bill-chips" id="bill-chips" hidden></div><div class="reading" id="bill-body"></div></div>`;
   drawBillBody();
 
-  bindPick(document.getElementById("bill-add"));
-  bindPick(document.getElementById("bill-month"));
-  bindPick(document.getElementById("bill-sort"));
+  for (const id of ["bill-add", "bill-sort", "bill-month"]) bindPick(document.getElementById(id));
   const fbtn = document.getElementById("bill-filter"), fmenu = document.getElementById("bill-fmenu");
-  if (fbtn) { fbtn.onclick = (e) => { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d); fmenu.hidden = !fmenu.hidden; fbtn.setAttribute("aria-expanded", String(!fmenu.hidden)); }; }
+  if (fbtn) fbtn.onclick = (e) => { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d); fmenu.hidden = !fmenu.hidden; fbtn.setAttribute("aria-expanded", String(!fmenu.hidden)); };
+  const qbtn = document.getElementById("bill-qbtn");
+  if (qbtn) qbtn.onclick = () => { MN.qOpen = true; renderMoney(d.month).then(() => { const q = document.getElementById("bill-q"); if (q) q.focus(); }); };
+  const q = document.getElementById("bill-q");
+  if (q) {
+    q.oninput = () => { MN.q = q.value; MN.all = false; drawBillBody(); };
+    q.onblur = () => { if (!MN.q) { MN.qOpen = false; setTimeout(() => { if (!MN.q && document.activeElement !== q && S.page === "money") renderMoney(d.month); }, 150); } };
+  }
   document.getElementById("money").onclick = (e) => {
     const t = e.target;
-    const add = t.closest("[data-add]");
-    if (add) { add.parentElement.hidden = true; return add.dataset.add === "pick" ? pickBills() : billHowtoDialog(); }
-    const tab = t.closest("[data-btab]");
-    if (tab) { MN.tab = tab.dataset.btab; MN.all = false; return renderMoney(d.month); }
-    const dir = t.closest("#bill-dir [data-v]");
-    if (dir) { MN.dir = dir.dataset.v; MN.all = false; document.querySelectorAll("#bill-dir button").forEach((x) => { x.classList.toggle("is-on", x === dir); x.setAttribute("aria-selected", String(x === dir)); }); return drawBillBody(); }
-    const mo = t.closest("[data-month]");
-    if (mo) { MN.all = false; location.hash = `#/money/${mo.dataset.month}`; return; }
-    const so = t.closest("[data-sort]");
-    if (so) { MN.sort = so.dataset.sort; return renderMoney(d.month); }
-    if (t.closest("[data-fdim]")) { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d, t.closest("[data-fdim]").dataset.fdim); return; }
-    if (t.closest("[data-fback]")) { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d); return; }
-    const fv = t.closest("[data-fval]");
-    if (fv) { MN.f[fv.dataset.fk] = fv.dataset.fval; MN.all = false; fmenu.hidden = true; return drawBillBody(); }
-    if (t.closest("[data-freset]")) { MN.f = { src: "", cat: "", method: "" }; fmenu.hidden = true; return drawBillBody(); }
-    const chip = t.closest("[data-chip]");
-    if (chip) { MN.f[chip.dataset.chip] = ""; return drawBillBody(); }
-    const row = t.closest("[data-bill]");
-    if (row) { const b = d.items.find((x) => x.id === row.dataset.bill); if (b) billDialog(b); return; }
-    const who = t.closest("[data-who]");
-    if (who) { MN.tab = "list"; MN.q = who.dataset.who; return renderMoney(d.month); }
-    const ip = t.closest("[data-imp]");
-    if (ip) return importDialog(d.imports[+ip.dataset.imp]);
+    const at = (sel) => t.closest(sel);
+    let x;
+    if ((x = at("[data-add]"))) { x.parentElement.hidden = true; return x.dataset.add === "pick" ? pickBills() : billHowtoDialog(); }
+    if ((x = at("[data-btab]"))) { MN.tab = x.dataset.btab; MN.all = false; MN.open = null; return renderMoney(d.month); }
+    if ((x = at("#bill-dir [data-v]"))) { MN.dir = x.dataset.v; MN.all = false; return renderMoney(d.month); }
+    if ((x = at("#bill-side [data-v]"))) { MN.side = x.dataset.v; MN.all = false; return renderMoney(d.month); }
+    if ((x = at("[data-month]"))) { MN.all = false; MN.day = ""; location.hash = `#/money/${x.dataset.month}`; return; }
+    if ((x = at("[data-sort]"))) { MN.sort = x.dataset.sort; return renderMoney(d.month); }
+    if ((x = at("[data-fdim]"))) { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d, x.dataset.fdim); return; }
+    if (at("[data-fback]")) { e.stopPropagation(); fmenu.innerHTML = billFilterMenu(d); return; }
+    if ((x = at("[data-fval]"))) { MN.f[x.dataset.fk] = x.dataset.fval; MN.all = false; fmenu.hidden = true; return drawBillBody(); }
+    if (at("[data-freset]")) { MN.f = { src: "", ttype: "", ctype: "", account: "", channel: "" }; fmenu.hidden = true; return drawBillBody(); }
+    if ((x = at("[data-chip]"))) { if (x.dataset.chip === "day") MN.day = ""; else MN.f[x.dataset.chip] = ""; return drawBillBody(); }
+    if (at("[data-more]")) { MN.all = true; return drawBillBody(); }
+    if ((x = at("[data-bill]"))) return billDialog(x.dataset.bill);
+    if ((x = at("[data-imp]"))) return importDialog(d.imports[+x.dataset.imp]);
+    if ((x = at("[data-day]"))) return billGo({ day: x.dataset.day, ctype: "" });
+    if ((x = at("[data-ctype-list]"))) return billGo({ ctype: x.dataset.ctypeList });
+    if ((x = at("[data-who]"))) return billGo({ q: x.dataset.who });
+    if ((x = at("[data-ttype]"))) return billGo({ ttype: x.dataset.ttype });
+    if ((x = at("[data-account]"))) return billGo({ account: x.dataset.account });
+    if ((x = at("tr[data-ctype]"))) {
+      if (MN.tab === "ctype") { MN.open = MN.open === x.dataset.ctype ? null : x.dataset.ctype; return drawBillBody(); }
+      return billGo({ ctype: x.dataset.ctype });
+    }
+    if ((x = at("[data-alert]"))) {
+      const a = ov.alerts[+x.dataset.alert];
+      if (a.action === "classify") return MN.busy ? null : billRun("classify", "classify_bills_ai");
+      if (a.id) return billDialog(a.id);
+      if (a.ctype) return billGo({ ctype: a.ctype });
+      if (a.q) return billGo({ q: a.q });
+      return;
+    }
+    if (at("#ins-gen")) return MN.busy ? null : billRun("insight", "generate_money_insight", { month: d.month });
+    if (at("#ai-cls")) return MN.busy ? null : billRun("classify", "classify_bills_ai");
+    if (at("#bill-rebuild")) return MN.busy ? null : billRun("rebuild", "rebuild_bills");
   };
-  const q = document.getElementById("bill-q");
-  if (q) q.oninput = () => { MN.q = q.value; MN.all = false; drawBillBody(); };
 }
 
 // ---------- 规矩 ----------
@@ -2077,8 +2276,13 @@ async function renderRules() {
   if (!S.rules) S.rules = await call("get_rules");
   const rules = S.rules;
   const today = await call("get_day", { date: localDay() }).catch(() => null);
+  // 预算（「外卖每月不超过 1500」）按导入的账单算这个月花了多少（手机上没有账单）
+  const budgets = rules.some((r) => /每月/.test(r.text)) && !(S.status && S.status.mobile)
+    ? ((await call("money_overview", { month: localDay().slice(0, 7) }).catch(() => null)) || {}).budgets || [] : [];
   const verdict = (r) => {
     if (r.enabled === false) return `<div class="verdict muted">${tr("暂不对照")}</div>`;
+    const bg = budgets.find((b) => b.text === r.text);
+    if (bg) return `<div class="verdict ${bg.ok ? "ok" : "over"}"><span>${tr("这个月已花")}</span><b>${yuan(bg.spent)} / ${yuan(bg.limit)}</b>${bg.ok ? ` · ${tr("守住了")}` : ` · ${tr("没守住")}`}</div>`;
     const c = checkRule(parseRule(r.text) || {}, today);
     if (!c) return `<div class="verdict muted">${tr("这条算不出来，交给日总结对照")}</div>`;
     return `<div class="verdict ${c.ok === null ? "muted" : c.ok ? "ok" : "over"}"><span>${esc(c.label)}</span>${c.value ? `<b>${esc(c.value)}</b>` : ""}${c.ok === null ? "" : c.ok ? ` · ${tr("守住了")}` : ` · ${tr("没守住")}`}</div>`;
@@ -3270,7 +3474,7 @@ function syncServerDialog() {
 }
 
 /** 模型用量：最近 30 天每天的 token（输入＋输出），按用途分。官方模型的本月额度在「官方服务」里 */
-const USE_KINDS = { segment: tr("10 分钟摘要"), hourly: tr("小时摘要"), daily: tr("日总结"), weekly: tr("周总结"), monthly: tr("月总结"), tag: tr("补标签"), alias: tr("项目归并"), other: tr("其他") };
+const USE_KINDS = { money: tr("钱"), segment: tr("10 分钟摘要"), hourly: tr("小时摘要"), daily: tr("日总结"), weekly: tr("周总结"), monthly: tr("月总结"), tag: tr("补标签"), alias: tr("项目归并"), other: tr("其他") };
 async function usageDialog() {
   let u;
   try { u = await call("llm_usage"); } catch (x) { return alert(String(x)); }

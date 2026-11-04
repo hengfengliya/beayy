@@ -7,7 +7,7 @@ Tauri 2 外壳加载的网页：今天、总结、收支、规矩、设备五页
 | 文件 | 内容 |
 |---|---|
 | `index.html` | 壳：侧栏（四个入口，左下角账号菜单：设置、暂停记录、设备与同步、打开数据目录、退出；记录状态写在名字后面）＋正文 |
-| `app.js` | 取数、路由（`#/today[/YYYY-MM-DD]`、`#/summary[/week｜month]/YYYY-MM-DD`、`#/money[/YYYY-MM]`、`#/rules`、`#/devices`、`#/settings`）、各页 |
+| `app.js` | 取数、路由（`#/today[/YYYY-MM-DD]`、`#/summary[/week｜month]/YYYY-MM-DD`、`#/money[/YYYY-MM｜YYYY]`（概览、明细、分类、对方、导入五个页签在页面内存里切）、`#/rules`、`#/devices`、`#/settings`）、各页 |
 | `style.css` | 壳的布局、作息图／一天的形状／读数（设计系统「人生记录」；读数数字 10-29 起用苹方加等宽数字，不用等宽字体，取自 `网站/static/`，变量加 `rec-` 前缀）、页面专用的几样 |
 | `vendor/moxian/` | 设计系统 Beayy（原名墨线）的 `tokens.css`（由 tokens.json 生成）和 `bundle.css`（原样拷贝），不要手改 |
 | `tools/同步墨线.py` | 设计系统改了就跑一次：`python3 app/ui/tools/同步墨线.py` |

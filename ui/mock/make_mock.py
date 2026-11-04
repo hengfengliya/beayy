@@ -790,51 +790,98 @@ for k, (typ, extra) in enumerate([("keyboard.text_input", {"app_name": "飞书",
     ev.append({"timestamp": iso(t), "event_type": typ, "device": MAC, **extra})
 mock["recent_events"] = {"events": ev, "more": True}
 
-# 收支：两个月的账单（微信、支付宝各一份，金额商户都是编的），格式同 get_bills，按月份存
-brnd = random.Random(7)
-SHOPS = [("街角咖啡", "餐饮美食", "拿铁", 2800, 3800), ("老街面馆", "餐饮美食", "牛肉面", 1800, 2600), ("云溪地铁", "交通出行", "地铁出行", 300, 600),
-         ("便利蜂", "日用百货", "饮料", 500, 1800), ("铁馆健身", "运动户外", "私教课", 28000, 28000), ("小区菜场", "餐饮美食", "买菜", 3000, 9000)]
-bills = []
-for k in range(70):
-    d = TODAY - timedelta(days=brnd.randint(0, 55))
-    who, cat, item, lo, hi = brnd.choice(SHOPS)
-    src = brnd.choice(["wechat", "alipay"])
-    bills.append({"src": src, "time": f"{d} {brnd.randint(8, 22):02d}:{brnd.randint(0, 59):02d}:00", "dir": "out", "fen": brnd.randint(lo, hi) // 10 * 10,
-                  "category": cat if src == "alipay" else "商户消费", "counterparty": who, "item": item, "method": "零钱" if src == "wechat" else "余额宝", "status": "支付成功" if src == "wechat" else "交易成功"})
-for m in {(TODAY - timedelta(days=n)).isoformat()[:7] for n in range(0, 56)}:
-    bills.append({"src": "alipay", "time": f"{m}-10 09:00:00", "dir": "in", "fen": 1250000, "category": "其他", "counterparty": "云溪科技", "item": "工资", "method": "", "status": "交易成功"})
-    bills.append({"src": "alipay", "time": f"{m}-05 10:00:00", "dir": "out", "fen": 320000, "category": "住房物业", "counterparty": "安居房屋", "item": "房租", "method": "余额宝", "status": "交易成功"})
-    bills.append({"src": "alipay", "time": f"{m}-12 21:00:00", "dir": "out", "fen": 59900, "category": "日用百货", "counterparty": "某网店", "item": "台灯", "method": "余额宝", "status": "交易关闭"})
-    bills.append({"src": "alipay", "time": f"{m}-15 03:00:00", "dir": "none", "fen": 200000, "category": "投资理财", "counterparty": "余额宝", "item": "单次转入", "method": "银行卡", "status": "交易成功"})
-bills.sort(key=lambda b: b["time"], reverse=True)
-by_month = {}
-for i, b in enumerate(bills):
-    m = b["time"][:7]
-    x = by_month.setdefault(m, {"month": m, "spend_fen": 0, "income_fen": 0, "refund_fen": 0, "count": 0, "days": {}, "to": {}, "items": []})
-    refund = b["fen"] if b["status"] == "交易关闭" else 0
-    counts = b["dir"] != "none"
-    out, inc = (b["fen"] - refund if b["dir"] == "out" else 0), (b["fen"] if b["dir"] == "in" else 0)
-    if counts:
-        x["count"] += 1; x["spend_fen"] += out; x["income_fen"] += inc; x["refund_fen"] += refund
-        dd = x["days"].setdefault(b["time"][:10], [0, 0]); dd[0] += out; dd[1] += inc
-        if out: t = x["to"].setdefault(b["counterparty"], [0, 0]); t[0] += out; t[1] += 1
-    yuan_ = f"{b['fen'] / 100:.2f}"
-    raw = ({"交易时间": b["time"], "交易类型": b["category"], "交易对方": b["counterparty"], "商品": b["item"], "收/支": {"out": "支出", "in": "收入"}.get(b["dir"], "/"),
-            "金额(元)": "¥" + yuan_, "支付方式": b["method"], "当前状态": b["status"], "交易单号": f"4200000{i:023d}"} if b["src"] == "wechat" else
-           {"交易时间": b["time"], "交易分类": b["category"], "交易对方": b["counterparty"], "商品说明": b["item"], "收/支": {"out": "支出", "in": "收入"}.get(b["dir"], "不计收支"),
-            "金额": yuan_, "收/付款方式": b["method"], "交易状态": b["status"], "交易订单号": f"2026{i:024d}"})
-    x["items"].append({"id": f"{b['src']}:demo{i}", **b, "refund_fen": refund, "counted": counts, "is_refund": False, "note": "", "order": "", "kind": "", "raw": raw})
-months_ = sorted(by_month, reverse=True)
-cover = {s: {"first": min(b["time"] for b in bills if b["src"] == s), "last": max(b["time"] for b in bills if b["src"] == s), "export": f"{TODAY} 10:40:00",
-             "count": sum(1 for b in bills if b["src"] == s)} for s in ("alipay", "wechat")}
-imports_ = [{"file": f"微信支付账单流水文件({FIRST:%Y%m%d}-{TODAY:%Y%m%d})_{TODAY:%Y%m%d}104521.xlsx", "src": "wechat", "format": "微信", "export": f"{TODAY} 10:45:21", "imported_at": f"{TODAY} 10:50:02",
-             "first": cover["wechat"]["first"], "last": cover["wechat"]["last"], "rows": cover["wechat"]["count"], "added": cover["wechat"]["count"], "updated": 0,
-             "meta": ["微信昵称：[小舟]", f"起始时间：[{FIRST} 00:00:00] 终止时间：[{TODAY} 10:45:21]", "导出类型：[全部]", f"导出时间：[{TODAY} 10:45:21]", f"共{cover['wechat']['count']}笔记录"]},
-            {"file": f"支付宝交易明细({FIRST:%Y%m%d}-{TODAY:%Y%m%d}).csv", "src": "alipay", "format": "支付宝", "export": f"{TODAY} 10:40:00", "imported_at": f"{TODAY} 10:50:02",
-             "first": cover["alipay"]["first"], "last": cover["alipay"]["last"], "rows": cover["alipay"]["count"], "added": cover["alipay"]["count"], "updated": 0,
-             "meta": ["姓名：小舟", f"起始时间：[{FIRST} 00:00:00] 终止时间：[{TODAY} 23:59:59]", "导出交易类型：[全部]", f"导出时间：[{TODAY} 10:40:00]", f"共{cover['alipay']['count']}笔记录"]}]
-mock["get_bills"] = {m: {**x, "months": months_, "coverage": cover, "imports": imports_, "days": [{"date": d, "spend_fen": v[0], "income_fen": v[1]} for d, v in sorted(x["days"].items())],
-                         "to": [{"name": n, "spend_fen": v[0], "count": v[1]} for n, v in sorted(x["to"].items(), key=lambda kv: -kv[1][0])][:10]} for m, x in by_month.items()}
+# 收支：虚构的三个月微信、支付宝账单（商户、人、金额都是编的），写成两家导出的格式，交给 Beayy 程序导入再算
+# （样例和真实算法一致，不在这里另写一遍）。要先编过 app（cargo build -p beayy）；没编就保留上次的样例。
+def make_bills():
+    import subprocess, tempfile
+    exe = next((p for p in [HERE.parents[1] / "target/debug/beayy", HERE.parents[1] / "target/release/beayy"] if p.exists()), None)
+    if not exe:
+        print("没找到 app/target/*/beayy，收支样例沿用上次的")
+        return
+    r = random.Random(11)
+    first = (TODAY.replace(day=1) - timedelta(days=62)).replace(day=1)
+    wx, ali = [], []  # (时间, 类型或分类, 对方, 说明, 收/支, 分, 方式, 状态)
+    d = first
+    while d <= TODAY:
+        if d.day == 10:
+            ali.append((at(d, 9), "收入", "云溪科技", "工资", "收入", 1250000, "账户余额", "交易成功"))
+        if d.day == 5:
+            ali.append((at(d, 10), "住房物业", "安居房屋", "房租", "支出", 320000, "余额宝", "交易成功"))
+            wx.append((at(d, 20, 30), "转账", "妈妈", "/", "支出", 100000, "零钱", "对方已收钱"))
+        if d.day == 18:
+            ali.append((at(d, 3), "商业服务", "云盘", "云盘会员连续包月", "支出", 2100, "花呗", "交易成功"))
+            wx.append((at(d, 8), "商户消费", "云音乐", "音乐会员", "支出", 1500, "零钱", "支付成功"))
+        if d.day == 15:
+            ali.append((at(d, 3), "投资理财", "余额宝", "余额宝-单次转入", "不计收支", 200000, "银行卡", "交易成功"))
+        for _ in range(r.randint(1, 3)):
+            who, cat, item, lo, hi = r.choice([("街角咖啡", "餐饮美食", "拿铁", 2800, 3800), ("老街面馆", "餐饮美食", "牛肉面", 1800, 2600), ("云溪地铁", "交通出行", "地铁出行", 300, 600),
+                                               ("便利蜂", "日用百货", "饮料", 500, 1800), ("小区菜场", "餐饮美食", "买菜", 3000, 9000), ("美团", "餐饮美食", "外卖订单", 2500, 6000)])
+            t = at(d, r.randint(8, 22), r.randint(0, 59))
+            if who == "美团" and r.random() < 0.3:
+                t = at(d, 23, r.randint(5, 55))
+            fen = r.randint(lo, hi) // 10 * 10
+            (wx if r.random() < 0.5 else ali).append((t, cat, who, item, "支出", fen, "零钱" if r.random() < 0.5 else "花呗", "支付成功"))
+        if d.weekday() in (1, 3):
+            ali.append((at(d, 19), "运动户外", "铁馆健身", "私教课", "支出", 28000, "余额宝", "交易成功"))
+        if r.random() < 0.08:
+            wx.append((at(d, 21), "微信红包（群红包）", "家人群", "/", "支出", r.randint(5, 20) * 100, "零钱", "已存入对方零钱"))
+        d += timedelta(days=1)
+    # 一笔大额、一笔退掉的
+    big = TODAY - timedelta(days=9)
+    ali.append((at(big, 15), "数码电器", "云溪数码", "相机", "支出", 499900, "花呗", "交易成功"))
+    ali.append((at(big - timedelta(days=20), 12), "日用百货", "某网店", "台灯", "支出", 59900, "余额宝", "交易关闭"))
+    ali.append((at(big - timedelta(days=19), 12), "退款", "某网店", "退款-台灯", "不计收支", 59900, "余额宝", "退款成功"))
+    tmp = Path(tempfile.mkdtemp())
+    export = f"{TODAY} 10:40:00"
+    def total(rows, kind, net):
+        xs = [x for x in rows if x[4] == kind and x[1] != "退款"]
+        return len(xs), sum(x[5] for x in xs if not (net and x[7] == "交易关闭")) / 100
+    wf = tmp / f"微信支付账单({first:%Y%m%d}-{TODAY:%Y%m%d}).csv"
+    ni, fi = total(wx, "收入", False); no, fo = total(wx, "支出", False)
+    lines = ["微信支付账单明细", "微信昵称：[小舟]", f"起始时间：[{first} 00:00:00] 终止时间：[{TODAY} 10:40:00]", f"导出时间：[{export}]", f"共{len(wx)}笔记录",
+             f"收入：{ni}笔 {fi:.2f}元", f"支出：{no}笔 {fo:.2f}元", "----------------------微信支付账单明细列表--------------------",
+             "交易时间,交易类型,交易对方,商品,收/支,金额(元),支付方式,当前状态,交易单号,商户单号,备注"]
+    for i, x in enumerate(sorted(wx, key=lambda x: x[0], reverse=True)):
+        lines.append(f"{x[0].strftime('%Y-%m-%d %H:%M:%S')},{x[1]},{x[2]},{x[3]},{x[4]},¥{x[5] / 100:.2f},{x[6]},{x[7]},42000{i:020d},/,/")
+    wf.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    af = tmp / f"支付宝交易明细({first:%Y%m%d}-{TODAY:%Y%m%d}).csv"
+    ni, fi = total(ali, "收入", True); no, fo = total(ali, "支出", True)
+    lines = ["导出信息：", "姓名：小舟", f"起始时间：[{first} 00:00:00]    终止时间：[{TODAY} 23:59:59]", f"导出时间：[{export}]", f"共{len(ali)}笔记录",
+             f"收入：{ni}笔 {fi:.2f}元", f"支出：{no}笔 {fo:.2f}元", "------------------------支付宝支付科技有限公司  电子客户回单------------------------",
+             "交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注,"]
+    lamp = None
+    for i, x in enumerate(sorted(ali, key=lambda x: x[0], reverse=True)):
+        oid = f"2026{i:024d}"
+        if x[1] == "退款":
+            oid = "LAMP_1"
+        elif x[3] == "台灯":
+            oid = "LAMP"
+        lines.append(f"{x[0].strftime('%Y-%m-%d %H:%M:%S')},{x[1]},{x[2]},/,{x[3]},{x[4]},{x[5] / 100:.2f},{x[6]},{x[7]},{oid},,,")
+    af.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    root = tmp / "root"
+    env = {**__import__("os").environ, "BEAYY_DATA_ROOT": str(root), "BEAYY_DEVICE": "mac-Demo-MacBook-Pro"}
+    env.pop("BEAYY_SHADOW", None)
+    run = lambda *a: json.loads(subprocess.check_output([str(exe), "--dump", *a], env=env))
+    run("import_bills", str(wf), str(af))
+    last = TODAY.isoformat()[:7]
+    (root / "bills" / "insights").mkdir(parents=True, exist_ok=True)
+    (root / "bills" / "insights" / f"{last}.md").write_text("## 钱去哪了\n\n这个月大头是房租和一台相机，吃饭主要在老街面馆和外卖。\n\n## 和以前比\n\n消费比前三个月平均多，主要多在数码电器（相机）；其他几类和平时差不多。\n\n## 建议\n\n- 外卖多在晚上 11 点以后，试试给外卖设个每月预算\n- 云盘和音乐会员每月固定扣，看看还用不用", encoding="utf-8")
+    gb, ov, one = {}, {}, {}
+    data = run("get_bills")
+    for m in data["years"] + data["months"]:
+        gb[m] = run("get_bills", m)
+        o = run("money_overview", m)
+        # 预算读的是正式数据目录的规矩（样例不能带真实的）：换成一条虚构的
+        o["alerts"] = [a for a in o["alerts"] if not a["text"].startswith("预算")]
+        spent = sum(b["fen"] - b["refund_fen"] for b in gb[m]["items"] if b["counted"] and b["ttype"] == "消费" and "外卖" in b["item"])
+        o["budgets"] = [{"text": "外卖每月不超过 600", "name": "外卖", "limit": 60000, "spent": spent, "ok": spent <= 60000}] if len(m) == 7 else []
+        ov[m] = o
+    for b in gb[last]["items"][:40]:
+        one[b["id"]] = run("get_bill", b["id"])
+    mock["get_bills"], mock["money_overview"], mock["get_bill"] = gb, ov, one
+
+
+make_bills()
 
 for k, v in mock.items():
     (HERE / f"{k}.json").write_text(json.dumps(v, ensure_ascii=False), encoding="utf-8")

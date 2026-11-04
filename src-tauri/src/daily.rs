@@ -154,6 +154,11 @@ fn secs_after(spans: &[(DateTime<Utc>, DateTime<Utc>)], from: DateTime<Utc>, to:
 
 /// 一条规矩今天守没守住：（对照说明，是否守住；None＝还没到点或算不出）
 fn check(rule: &str, date: NaiveDate, day: &Value) -> (String, Option<bool>) {
+    // 预算（「外卖每月不超过 1500」）：按账单算这个月到这天花了多少
+    #[cfg(not(beayy_mobile))]
+    if let Some(x) = crate::money::budget_check(rule, date) {
+        return x;
+    }
     let Some(r) = parse_rule(rule) else { return ("算不出来，看下面的偏离".into(), None) };
     let live = &day["live"];
     let phone = &day["phone"];
@@ -634,6 +639,9 @@ fn day_input(date: NaiveDate) -> Result<DayInput, String> {
         stats.push(line.clone());
     }
     stats.extend(health_lines(&day["health"]));
+    // 钱：导入过账单的日子（手机核心没有账单）
+    #[cfg(not(beayy_mobile))]
+    stats.extend(crate::money::day_line(date));
     let tree = |k: &str| -> Vec<String> {
         work[k].as_array().cloned().unwrap_or_default().iter().map(|g| {
             let kids: Vec<String> = g["children"].as_array().cloned().unwrap_or_default().iter().take(4).map(|c| format!("{} {}", c["name"].as_str().unwrap_or(""), dur(c["sec"].as_f64().unwrap_or(0.0)))).collect();
