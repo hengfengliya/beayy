@@ -2,8 +2,8 @@
 //! - 合计按账单的收/支（和两家账单自带的合计一致），往下先按交易类型拆，消费再按消费类型拆。
 //! - 交易类型（钱怎么动的，每笔都有）：微信看交易类型；支付宝看交易分类（它把交易类型和消费类型混在一列），
 //!   只有网页版、没有交易分类的按说明猜。
-//! - 消费类型（花在什么上，只给消费），依次看：你手改的 → 支付宝账单自带的 → 你定的（同一个对方都这样）
-//!   → 内置关键词 → AI 分的（只发对方名和说明）；都没有是「未分类」。
+//! - 消费类型（花在什么上，只给消费），依次看：你手改的 → 你定的（同一个对方都这样）→ 支付宝账单自带的
+//!   → 内置关键词 → AI 分的（只发对方名和说明）→ 账单写的「其他」；都没有是「未分类」。
 //! - 都是读的时候现算：手改存 bills/overrides.json，你定的规则 bills/rules.json，AI 分的 bills/ai.json，改了马上生效，不碰账单本身。
 //! - 每月的「钱」总结（AI 写）存 bills/insights/YYYY-MM.md，材料只给汇总，不给逐笔流水。
 
@@ -371,7 +371,7 @@ pub fn get_bills(month: Option<String>) -> Value {
         "years": years,
         "items": vs.iter().filter(|v| v.b.time.starts_with(&period)).map(View::json).collect::<Vec<_>>(),
         "coverage": bills::coverage(&c.all),
-        "imports": bills::imports(),
+        "imports": bills::imports_view(),
         "ttypes": TTYPES,
         "ctypes": CTYPES,
         "unclassified": unclassified,
@@ -624,25 +624,39 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
         .collect();
     by_ctype.sort_by_key(|x| -x["fen"].as_i64().unwrap_or(0));
 
+    // 每月、每天的消费按消费类型拆（图上堆叠着画）
+    let by_c = |rows: &[&View]| -> serde_json::Map<String, Value> { cmap(rows).into_iter().filter(|(_, (f, _))| *f > 0).map(|(k, (f, _))| (k, json!(f))).collect() };
     let trend: Vec<Value> = trend_months
         .iter()
         .map(|m| {
-            let s = sum_of(pv(m).into_iter());
-            json!({"month": m, "consume": s.consume, "out": s.out, "income": s.inc, "has": months.contains(m)})
+            let rows = pv(m);
+            let s = sum_of(rows.iter().copied());
+            json!({"month": m, "consume": s.consume, "out": s.out, "income": s.inc, "has": months.contains(m), "by": by_c(&rows)})
         })
         .collect();
+    // 图上给消费类型上色：全部账单里消费最多的 5 类（「其他」、没分类的不算），换月、换图颜色不变；别的是灰色的「其余」
+    let palette: Vec<String> = {
+        let mut m: HashMap<&str, i64> = HashMap::new();
+        for v in vs.iter().filter(|v| v.counted && v.ttype == "消费" && !v.ctype.is_empty() && v.ctype != "其他") {
+            *m.entry(v.ctype.as_str()).or_default() += v.out;
+        }
+        let mut xs: Vec<(&str, i64)> = m.into_iter().filter(|x| x.1 > 0).collect();
+        xs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        xs.into_iter().take(5).map(|x| x.0.to_string()).collect()
+    };
 
     // 每天（月份时）
     let days: Vec<Value> = if is_month {
-        let mut d: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+        let mut d: BTreeMap<String, Vec<&View>> = BTreeMap::new();
         for v in inp.iter().filter(|v| v.counted) {
-            let e = d.entry(v.b.time[..10].to_string()).or_default();
-            if v.ttype == "消费" {
-                e.0 += v.out;
-            }
-            e.1 += v.out;
+            d.entry(v.b.time[..10].to_string()).or_default().push(v);
         }
-        d.into_iter().map(|(k, (c, o))| json!({"date": k, "consume": c, "out": o})).collect()
+        d.into_iter()
+            .map(|(k, rows)| {
+                let s = sum_of(rows.iter().copied());
+                json!({"date": k, "consume": s.consume, "out": s.out, "by": by_c(&rows)})
+            })
+            .collect()
     } else {
         vec![]
     };
@@ -805,6 +819,7 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
         "by_ttype": by_ttype,
         "by_ctype": by_ctype,
         "trend": trend,
+        "palette": palette,
         "days": days,
         "merchants": merchants.into_iter().take(15).map(|(k, (f, n, c))| json!({"name": k, "fen": f, "n": n, "ctype": c})).collect::<Vec<_>>(),
         "people": people.into_iter().take(30).map(|(k, (o, i, n))| json!({"name": k, "out": o, "in": i, "n": n})).collect::<Vec<_>>(),
@@ -819,22 +834,132 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
     })
 }
 
-const INSIGHT_PROMPT: &str = "你是用户的理财助手。下面是用户这个月微信、支付宝账单的汇总（不是逐笔流水）：合计、和前三个月平均比、按交易类型和消费类型拆、主要商户、转账来往、付款账户、固定扣费、深夜消费、代码算出的提醒、预算。
-据此写这个月的「钱」总结，用第二人称「你」，平实、具体，不夸、不说教，只写材料里有的事和数字，不编造。
-支出合计按账单的收/支算，里面有转账、红包这些不是消费的；说花钱习惯时看「消费」和消费类型，转账、红包按交易类型说，不要另起「转给人」之类的口径。
-提醒里的「大额」是一次性的，单独提一句就行，不要据此建议设预算；建议优先针对反复出现的花销：固定扣费、深夜消费、连续几个月上涨的类。
-用 Markdown，三个小标题，每段几句话：
-## 钱去哪了
-## 和以前比
+const INSIGHT_PROMPT: &str = "你是用户的理财顾问，帮用户看懂这个月的钱。材料是这个月微信、支付宝账单的汇总和代码算好的线索，不是逐笔流水。
+页面上的图表已经画出了支出、消费、收入、每类花了多少、近 12 个月的走势和每天花了多少，用户看得到这些数。所以：
+- 不复述合计，不逐类罗列金额，不把材料改写成句子。
+- 写图表看不出来的：变化是怎么来的（多买了几次还是买得更贵，是一两笔大额还是日常在涨）、钱花在什么时候、和作息的关系、哪些是一次性的哪些会反复出现、值得警惕或值得保持的地方。
+- 每条先用一句话下结论并加粗，后面一两句给证据和它意味着什么；证据只引用最关键的一两个数：一万以上写「11.4 万元」，以下写整数元，或者百分比、倍数。
+- 支出合计按账单的收/支算，里面有转账、红包这些不是消费；说花钱习惯看消费和消费类型，转账、红包按交易类型说，不要另起「转给人」之类的口径。转账金额大但材料看不出用途的，不猜用途。
+- 一次性的大额提一句就行，不据此建议设预算；建议针对会反复出现的花销。
+- 用第二人称「你」，平实、具体，不夸、不说教，不编造材料里没有的事。数字和汉字之间空一格（7 笔、2000 元）。
+用 Markdown，两个小标题：
+## 发现
+3～4 条，按重要性排，每条一行，用「- 」开头。
 ## 建议
-建议给 2～3 条能直接做的（比如某类设个预算、某个固定扣费要不要停），每条一行，用「- 」开头。";
+1～3 条能直接做的事（给某类设每月上限、停掉某个固定扣费、某个时段别下单），每条一行，用「- 」开头。";
 
-/// AI 写这个月的「钱」总结（材料只给汇总），存 bills/insights/YYYY-MM.md
-#[tauri::command(async)]
-pub fn generate_money_insight(month: String) -> Result<String, String> {
-    if month.len() != 7 {
-        return Err("只写一个月的".into());
+/// 给 AI 的线索：图上看不出来、要算的（这个月和前几个月同期比）
+fn clues(vs: &[View], month: &str, prev: &[String], upto: Option<&str>) -> String {
+    let cut = upto.map(|d| &d[8..10]);
+    let consume = |m: &str| -> Vec<&View> {
+        vs.iter().filter(|v| v.counted && v.ttype == "消费" && v.out > 0 && v.b.time.starts_with(m) && cut.map_or(true, |c| &v.b.time[8..10] <= c)).collect()
+    };
+    let cur = consume(month);
+    let before: Vec<Vec<&View>> = prev.iter().map(|m| consume(m)).collect();
+    let k = before.len().max(1) as i64;
+    let total = |xs: &[&View]| xs.iter().map(|v| v.out).sum::<i64>();
+    let mut out = String::new();
+    // 笔数和每笔多少：多花是买得多还是买得贵
+    let (n, f) = (cur.len() as i64, total(&cur));
+    let (pn, pf) = (before.iter().map(|x| x.len() as i64).sum::<i64>() / k, before.iter().map(|x| total(x)).sum::<i64>() / k);
+    out += &format!("- 消费 {n} 笔，平均每笔 {} 元；前几个月同期平均每月 {pn} 笔，每笔 {} 元\n", f / 100 / n.max(1), pf / 100 / pn.max(1));
+    // 日常（单笔 500 元以下）和大额（2000 元以上）分开
+    let small = |xs: &[&View]| -> (i64, i64) { let s: Vec<&&View> = xs.iter().filter(|v| v.out < 50000).collect(); (s.len() as i64, s.iter().map(|v| v.out).sum()) };
+    let (sn, sf) = small(&cur);
+    let (psn, psf) = before.iter().map(|x| small(x)).fold((0, 0), |a, x| (a.0 + x.0, a.1 + x.1));
+    out += &format!("- 日常消费（单笔 500 元以下）{sn} 笔 {} 元；前几个月同期平均 {} 笔 {} 元\n", sf / 100, psn / k, psf / k / 100);
+    let mut big: Vec<&&View> = cur.iter().filter(|v| v.out >= 200000).collect();
+    big.sort_by_key(|v| -v.out);
+    if !big.is_empty() {
+        let names: Vec<String> = big.iter().take(4).map(|v| format!("{}（{}）{} 元", v.who(), if v.ctype.is_empty() { "未分类" } else { &v.ctype }, v.out / 100)).collect();
+        out += &format!("- 2000 元以上的 {} 笔，共 {} 元，占消费的 {}%：{}\n", big.len(), total(&big.iter().map(|v| **v).collect::<Vec<_>>()) / 100, total(&big.iter().map(|v| **v).collect::<Vec<_>>()) * 100 / f.max(1), names.join("、"));
     }
+    // 工作日和周末：每天平均花多少（只算日常的）
+    use chrono::Datelike;
+    let last_day = upto.map(String::from).unwrap_or_else(|| month_end(month).min(chrono::Local::now().format("%Y-%m-%d").to_string()));
+    if let (Ok(a), Ok(z)) = (chrono::NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d"), chrono::NaiveDate::parse_from_str(&last_day, "%Y-%m-%d")) {
+        let (mut wd, mut we) = (0i64, 0i64);
+        let mut d = a;
+        while d <= z {
+            if d.weekday().number_from_monday() >= 6 { we += 1 } else { wd += 1 }
+            d += chrono::Duration::days(1);
+        }
+        let is_we = |v: &View| chrono::NaiveDate::parse_from_str(&v.b.time[..10], "%Y-%m-%d").map(|d| d.weekday().number_from_monday() >= 6).unwrap_or(false);
+        let fw: i64 = cur.iter().filter(|v| v.out < 50000 && !is_we(v)).map(|v| v.out).sum();
+        let fe: i64 = cur.iter().filter(|v| v.out < 50000 && is_we(v)).map(|v| v.out).sum();
+        if wd > 0 && we > 0 {
+            out += &format!("- 日常消费每天平均：工作日 {} 元（{wd} 天），周末 {} 元（{we} 天）\n", fw / wd / 100, fe / we / 100);
+        }
+    }
+    // 什么时候花的
+    let slots = [("早上 5–11 点", 5, 11), ("中午 11–14 点", 11, 14), ("下午 14–18 点", 14, 18), ("晚上 18–23 点", 18, 23)];
+    let hour = |v: &View| v.b.time[11..13].parse::<u32>().unwrap_or(12);
+    let mut parts: Vec<String> = slots.iter().map(|(name, a, z)| {
+        let xs: Vec<&&View> = cur.iter().filter(|v| (*a..*z).contains(&hour(v))).collect();
+        format!("{name} {} 笔 {} 元", xs.len(), xs.iter().map(|v| v.out).sum::<i64>() / 100)
+    }).collect();
+    let late: Vec<&&View> = cur.iter().filter(|v| !(5..23).contains(&hour(v))).collect();
+    let plate = before.iter().map(|x| x.iter().filter(|v| !(5..23).contains(&hour(v))).count() as i64).sum::<i64>() / k;
+    parts.push(format!("深夜 23–5 点 {} 笔 {} 元（前几个月同期平均每月 {plate} 笔）", late.len(), late.iter().map(|v| v.out).sum::<i64>() / 100));
+    out += &format!("- 什么时候花的：{}\n", parts.join("；"));
+    let mut late_c: HashMap<String, i64> = HashMap::new();
+    for v in &late {
+        *late_c.entry(if v.ctype.is_empty() { "未分类".into() } else { v.ctype.clone() }).or_default() += 1;
+    }
+    let mut late_c: Vec<(String, i64)> = late_c.into_iter().collect();
+    late_c.sort_by_key(|x| -x.1);
+    if !late_c.is_empty() {
+        out += &format!("- 深夜消费多是：{}\n", late_c.iter().take(3).map(|(c, n)| format!("{c} {n} 笔")).collect::<Vec<_>>().join("、"));
+    }
+    // 深夜下单的那几晚，和这个月别的晚上比熬得多晚（Beayy 的作息：一晚＝当天 21 点以后＋次日 0–5 点在电脑、手机上的时间）
+    if !late.is_empty() {
+        let first = format!("{month}-01");
+        if let Ok(r) = crate::data::get_range(first, last_day.clone()) {
+            let night: HashMap<String, i64> = r["days"].as_array().into_iter().flatten().filter_map(|d| Some((d["date"].as_str()?.to_string(), d["night_sec"].as_i64()?))).collect();
+            let of = |v: &View| -> String {
+                let d = chrono::NaiveDate::parse_from_str(&v.b.time[..10], "%Y-%m-%d").unwrap_or_default();
+                if hour(v) < 5 { (d - chrono::Duration::days(1)).format("%Y-%m-%d").to_string() } else { d.format("%Y-%m-%d").to_string() }
+            };
+            let nights: std::collections::HashSet<String> = late.iter().map(|v| of(v)).filter(|d| night.contains_key(d)).collect();
+            let rest: Vec<i64> = night.iter().filter(|(d, _)| !nights.contains(*d)).map(|(_, s)| *s).collect();
+            if !nights.is_empty() && !rest.is_empty() {
+                let a = nights.iter().map(|d| night[d]).sum::<i64>() as f64 / nights.len() as f64 / 3600.0;
+                let b = rest.iter().sum::<i64>() as f64 / rest.len() as f64 / 3600.0;
+                out += &format!("- 深夜下单的 {} 个晚上，21 点以后平均还在电脑、手机上 {a:.1} 小时；这个月其他晚上平均 {b:.1} 小时\n", nights.len());
+            }
+        }
+    }
+    // 钱集中在哪几家；这个月第一次出现的商户
+    let mut by_who: HashMap<String, i64> = HashMap::new();
+    for v in &cur {
+        *by_who.entry(v.who()).or_default() += v.out;
+    }
+    let mut top: Vec<(String, i64)> = by_who.into_iter().collect();
+    top.sort_by_key(|x| -x.1);
+    let top3: i64 = top.iter().take(3).map(|x| x.1).sum();
+    out += &format!("- 消费最多的 3 家占消费的 {}%：{}\n", top3 * 100 / f.max(1), top.iter().take(3).map(|x| x.0.clone()).collect::<Vec<_>>().join("、"));
+    let seen: std::collections::HashSet<String> = vs.iter().filter(|v| v.counted && v.ttype == "消费" && v.b.time[..7] < *month).map(|v| v.who()).collect();
+    let mut fresh: Vec<&(String, i64)> = top.iter().filter(|x| !seen.contains(&x.0)).collect();
+    fresh.sort_by_key(|x| -x.1);
+    if !fresh.is_empty() && !seen.is_empty() {
+        out += &format!("- 这个月第一次付钱的商户 {} 家，共 {} 元，最多的是 {}\n", fresh.len(), fresh.iter().map(|x| x.1).sum::<i64>() / 100, fresh.iter().take(3).map(|x| x.0.clone()).collect::<Vec<_>>().join("、"));
+    }
+    // 连着涨的类：这个月 > 上个月 > 上上个月（都按同期）
+    if before.len() >= 2 {
+        let by = |xs: &[&View]| -> HashMap<String, i64> { let mut m = HashMap::new(); for v in xs { *m.entry(v.ctype.clone()).or_default() += v.out; } m };
+        let (c0, c1, c2) = (by(&cur), by(&before[0]), by(&before[1]));
+        let mut ups: Vec<String> = c0.iter().filter(|(k, f)| !k.is_empty() && c1.get(*k).map_or(false, |b| *f > b && c2.get(*k).map_or(false, |c| b > c && *c > 0))).map(|(k, f)| format!("{k}（{} → {} → {} 元）", c2[k] / 100, c1[k] / 100, f / 100)).collect();
+        ups.sort();
+        if !ups.is_empty() {
+            out += &format!("- 连着两个月在涨的：{}\n", ups.join("、"));
+        }
+    }
+    out
+}
+
+/// 给 AI 的材料：这个月的汇总和线索（调试：beayy --dump money_material YYYY-MM）
+pub fn insight_material(month: &str) -> String {
+    let month = month.to_string();
     let c = ctx();
     let vs = c.views();
     let o = overview(&vs, Some(month.clone()));
@@ -857,19 +982,34 @@ pub fn generate_money_insight(month: String) -> Result<String, String> {
     user += &lines("by_ttype", &|x| format!("{} 支出 {} 收入 {}（{} 笔）", x["name"].as_str().unwrap_or(""), f(&x["out"]), f(&x["in"]), x["n"]));
     user += &format!("\n消费按类型（括号里是{base}）：\n");
     user += &lines("by_ctype", &|x| format!("{} {} 元，{} 笔（{}）", x["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("未分类"), f(&x["fen"]), x["n"], x["avg3"].as_i64().map(|a| yuan(a)).unwrap_or("没有".into())));
-    user += "\n主要商户：\n";
-    user += &lines("merchants", &|x| format!("{}（{}）{} 元，{} 笔", x["name"].as_str().unwrap_or(""), x["ctype"].as_str().unwrap_or(""), f(&x["fen"]), x["n"]));
+    let prev: Vec<String> = o["prev"]["months"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(String::from)).collect();
+    user += "\n代码算好的线索：\n";
+    user += &clues(&vs, &month, &prev, o["upto"].as_str());
+    user += "\n转账、红包来往最多的人（给出／收到）：\n";
+    user += &o["people"].as_array().cloned().unwrap_or_default().iter().take(3).map(|x| format!("- {} {} / {} 元，{} 笔\n", x["name"].as_str().unwrap_or(""), f(&x["out"]), f(&x["in"]), x["n"])).collect::<String>();
     user += "\n付款账户：\n";
     user += &lines("accounts", &|x| format!("{}{} {} 元", x["name"].as_str().unwrap_or(""), if x["credit"] == true { "（信用）" } else { "" }, f(&x["fen"])));
+    if let (Some(a), Some(b)) = (o["credit"].as_f64(), o["credit_prev"].as_f64()) {
+        user += &format!("消费里花呗、信用卡付的占 {:.0}%，前三个月 {:.0}%\n", a * 100.0, b * 100.0);
+    }
     user += "\n固定扣费：\n";
-    user += &lines("recurring", &|x| format!("{} 每月约 {} 元{}{}", x["name"].as_str().unwrap_or(""), f(&x["avg"]), if x["rise"] == true { "，这个月涨了" } else { "" }, if x["new"] == true { "，新出现" } else { "" }));
-    user += &format!("\n深夜（23 点以后）消费：{} 笔 {} 元\n", o["late"]["n"], f(&o["late"]["fen"]));
+    user += &lines("recurring", &|x| format!("{} 每月约 {} 元，{} 个月{}{}", x["name"].as_str().unwrap_or(""), f(&x["avg"]), x["months"], if x["rise"] == true { "，这个月涨了" } else { "" }, if x["new"] == true { "，新出现" } else { "" }));
     user += "\n提醒：\n";
     user += &lines("alerts", &|x| x["text"].as_str().unwrap_or("").to_string());
     user += "\n预算：\n";
     user += &lines("budgets", &|x| format!("{}：已花 {} 元", x["text"].as_str().unwrap_or(""), f(&x["spent"])));
+    user
+}
+
+/// AI 写这个月的「钱」总结（材料只给汇总和线索），存 bills/insights/YYYY-MM.md
+#[tauri::command(async)]
+pub fn generate_money_insight(month: String) -> Result<String, String> {
+    if month.len() != 7 {
+        return Err("只写一个月的".into());
+    }
+    let user = insight_material(&month);
     let sm = beayy_summary::Summarizer::new(default_root());
-    let system = if sm.out_lang() == "en" { format!("{INSIGHT_PROMPT}\nWrite everything in English, with headings: Where the money went / Compared with before / Suggestions.") } else { INSIGHT_PROMPT.to_string() };
+    let system = if sm.out_lang() == "en" { format!("{INSIGHT_PROMPT}\nWrite everything in English, with headings: Findings / Suggestions.") } else { INSIGHT_PROMPT.to_string() };
     let md = sm.ask_text("money", &system, &user, 0.4)?;
     let md = md.trim().trim_start_matches("```markdown").trim_start_matches("```").trim_end_matches("```").trim().to_string();
     if md.is_empty() {

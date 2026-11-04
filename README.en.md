@@ -14,6 +14,8 @@ A summary every 10 minutes, a journal every evening, rolled up into weekly and m
 [简体中文](README.md) · **English**
 
 [![Release](https://img.shields.io/github/v/release/hengfengliya/beayy?label=download&color=0b0b0b)](https://github.com/hengfengliya/beayy/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/hengfengliya/beayy/total?label=downloads&color=0b0b0b)](https://github.com/hengfengliya/beayy/releases)
+[![Stars](https://img.shields.io/github/stars/hengfengliya/beayy?color=0b0b0b)](https://github.com/hengfengliya/beayy/stargazers)
 [![License](https://img.shields.io/github/license/hengfengliya/beayy?color=0b0b0b)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Windows%2010%2F11%20%C2%B7%20iPhone-0b0b0b)
 
@@ -157,6 +159,17 @@ UI only: open `ui/index.html` in a browser. It reads the made-up sample data in 
 | `docs/images` | Images for this README, showing made-up sample data |
 
 </details>
+
+## Star history
+
+<p align="center">
+<a href="https://www.star-history.com/#hengfengliya/beayy&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=hengfengliya/beayy&type=Date&theme=dark">
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=hengfengliya/beayy&type=Date" width="640">
+  </picture>
+</a>
+</p>
 
 ## Feedback
 

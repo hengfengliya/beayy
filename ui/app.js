@@ -1780,7 +1780,7 @@ async function renderMonth(arg) {
 // ---------- 收支：导入的微信、支付宝账单，在上面看钱（app/src-tauri/src/bills.rs、money.rs；方案 报告/方案_20261104_金钱管理.md） ----------
 
 // 页签、方向、搜索、筛选、排序都只在这一页的内存里，换月不丢
-const MN = { tab: "overview", dir: "out", side: "merchant", q: "", qOpen: false, f: { src: "", ttype: "", ctype: "", account: "", channel: "" }, day: "", sort: "time-desc", all: false, open: null, month: null, data: null, ov: null, busy: null, err: null };
+const MN = { tab: "overview", view: "rank", dir: "out", side: "merchant", q: "", qOpen: false, f: { src: "", ttype: "", ctype: "", account: "", channel: "" }, day: "", sort: "time-desc", all: false, open: null, month: null, data: null, ov: null, busy: null, err: null };
 const yuan = (f) => (f / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 /** 读数的大数字取整元（精确的放悬停） */
 const yuanRound = (f) => Math.round(f / 100).toLocaleString("en-US");
@@ -1883,7 +1883,7 @@ async function billDialog(id) {
     } });
 }
 
-/** 一份导入的账单：表头、表尾写的（账户、起止、共几笔、合计）、对账、这次导入的结果 */
+/** 一份导入的账单：表头、表尾写的（账户、起止、共几笔、合计）、对账、和别的账单重合几笔、这次导入的结果；可以删 */
 function importDialog(x) {
   const c = x.check || null;
   const chk = c ? `<dl class="mx-facts bill-facts">${[[tr("账单写的收入"), `${c.bill_n_in} · ${yuan(c.bill_in)}`], [tr("算出的收入"), `${c.n_in} · ${yuan(c.ours_in)}`], [tr("账单写的支出"), `${c.bill_n_out} · ${yuan(c.bill_out)}`], [tr("算出的支出"), `${c.n_out} · ${yuan(c.ours_out)}`]]
@@ -1892,8 +1892,30 @@ function importDialog(x) {
     `<dl class="mx-facts bill-facts">${[[tr("账单"), tr(x.format)], [tr("笔数"), numText(x.rows)], [tr("新增"), numText(x.added)], [tr("更新"), numText(x.updated)],
       [tr("第一笔"), x.first], [tr("最后一笔"), x.last], [tr("导出时间"), x.export], [tr("导入时间"), x.imported_at]].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v || "—")}</dd></div>`).join("")}</dl>
      ${c ? `<div class="mx-menu-group bill-raw-h">${c.ok ? tr("对账：对上了") : tr("对账：没对上")}</div>${chk}` : ""}
-     ${x.meta && x.meta.length ? `<div class="mx-menu-group bill-raw-h">${tr("账单上写的")}</div><ul class="bill-meta">${x.meta.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}` });
+     ${x.overlap ? `<div class="mx-menu-group bill-raw-h">${tr("和别的账单重合")}</div><dl class="mx-facts bill-facts">${[...x.overlap.map((o) => [`${tr(o.format)} · ${o.export.slice(0, 16)}`, tr("{n} 笔", { n: numText(o.n) })]), [tr("只在这份里"), tr("{n} 笔", { n: numText(x.only) })]]
+        .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd class="mx-num">${esc(v)}</dd></div>`).join("")}</dl>` : ""}
+     ${x.meta && x.meta.length ? `<div class="mx-menu-group bill-raw-h">${tr("账单上写的")}</div><ul class="bill-meta">${x.meta.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>` : ""}
+     <div class="bill-del" id="imp-del">${impDelBody(x, false)}</div>`,
+    onOpen: (el, dlg) => {
+      const box = el.querySelector("#imp-del");
+      box.onclick = async (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        if (b.dataset.del === "ask") { box.innerHTML = impDelBody(x, true); return; }
+        if (b.dataset.del === "keep") { box.innerHTML = impDelBody(x, false); return; }
+        if (b.dataset.del === "go") {
+          b.disabled = true; dlg.setErr(null);
+          const r = await call("delete_bill_import", { format: x.format, export: x.export }).catch((err) => ({ error: String(err && err.message ? err.message : err) }));
+          if (r && r.error) { b.disabled = false; return dlg.setErr(r.error); }
+          closeDialog(); renderMoney(MN.month);
+        }
+      };
+    } });
 }
+
+/** 删一份账单：先问一句；只在这份里的那些笔会一起没了 */
+const impDelBody = (x, asking) => asking
+  ? `<div class="mx-confirm"><div class="mx-confirm-text"><b>${tr("删除这份账单？")}</b><span>${x.only === 0 ? tr("这份里的每一笔别的账单都有，删了不少记录。") : x.only != null ? esc(tr("只在这份里的 {n} 笔会一起删掉。", { n: numText(x.only) })) : tr("只在这份里的那些笔会一起删掉。")}</span></div><button class="mx-btn mx-btn--secondary" data-del="keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger" data-del="go">${tr("删除")}</button></div>`
+  : `<button class="mx-btn mx-btn--text mx-btn--sm bill-del-btn" data-del="ask">${tr("删除这份账单")}</button>`;
 
 /** 这段时间里筛过的：搜索、筛选、某一天；dir 是收支方向（null＝不看方向） */
 function billRows(d, dir = MN.dir) {
@@ -1918,42 +1940,77 @@ const billMore = (n, shown, unit) => (n > shown ? `<button class="mx-btn mx-btn-
 
 // ---------- 概览 ----------
 
-/** 近 12 个月的消费：每月一根柱（转账这类大额会把消费压扁，只画消费；支出、收入在悬停里），有账单以前的月份不画；点一根换到那个月 */
+// 消费类型的颜色：后端按全部账单挑的消费最多的 5 类（ov.palette）用地点那 6 色里的 5 个，别的是灰色的「其余」；换月、换图颜色不变
+const ctTone = (ov, name) => (ov.palette || []).indexOf(name) + 1;
+const ctColor = (ov, name) => `var(--mn-${ctTone(ov, name) || "rest"})`;
+/** 大数字缩写（柱顶）：一万以上写「8.6 万」 */
+const yuanShort = (f) => (f >= 1e6 ? (LANG === "zh" ? `${(f / 1e6).toFixed(1)} 万` : `${Math.round(f / 1e5)}k`) : yuanRound(f));
+/** 悬停里的一段：合计＋每类（多的在前） */
+const ctTip = (head, total, by, extra = "") => [head, `${tr("消费")} ${yuan(total)}`, ...Object.entries(by || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `  ${tr(k || "未分类")} ${yuan(v)}`), extra].filter(Boolean).join("\n");
+
+/** 一排竖柱，每根按消费类型堆起来（颜色排前的类在下，灰色的「其余」在上）。
+ *  一两根特别高的会把别的压扁：纵轴最高取有数的柱的中位数的 3 倍（最多截两根），超出的整根按比例压到顶（各类的比例不变）、画断口、顶上写金额 */
+function stackCols(ov, cols, cls, dense = false) {
+  const vals = cols.map((c) => c.total).filter((v) => v > 0).sort((a, b) => a - b);
+  const real = Math.max(1, ...cols.map((c) => c.total)), mid = vals.length ? vals[Math.floor(vals.length / 2)] : 1;
+  const max = vals.length >= 4 && real > mid * 3 ? Math.max(mid * 3, vals[vals.length - 3]) : real;
+  const pal = ov.palette || [];
+  return `<div class="mn-cols ${cls}">${cols.map((c, i) => {
+    const parts = [...pal.map((n) => [ctColor(ov, n), (c.by || {})[n] || 0]), ["var(--mn-rest)", Object.entries(c.by || {}).filter(([k]) => !pal.includes(k)).reduce((a, [, v]) => a + v, 0)]];
+    const k = Math.min(c.total, max) / Math.max(c.total, 1) / max;
+    const segs = parts.map(([color, v]) => (v > 0 ? `<i style="height:${(v * k * 100).toFixed(2)}%;background:${color}"></i>` : "")).join("");
+    // 窄柱挨着的两根都截断，金额字会叠在一起：后一根不写（悬停里有）
+    const cut = c.total > max, label = cut && !(dense && i > 0 && cols[i - 1].total > max);
+    return `<button class="mn-col${c.cls ? " " + c.cls : ""}" ${c.attrs || ""} title="${esc(c.tip)}">${label ? `<span class="mn-cut mx-num">${esc(yuanShort(c.total))}</span>` : ""}<span class="mn-stack${cut ? " is-cut" : ""}">${segs}</span><span class="mn-l">${c.label}</span></button>`;
+  }).join("")}</div>`;
+}
+
+const ctLegend = (ov) => `<div class="legend mn-legend">${(ov.palette || []).map((n) => `<span><i style="background:${ctColor(ov, n)}"></i>${esc(tr(n))}</span>`).join("")}<span><i style="background:var(--mn-rest)"></i>${tr("其余")}</span></div>`;
+
+/** 近 12 个月的消费（转账这类大额会把消费压扁，只画消费；支出、收入在悬停里），有账单以前的月份不画；点一根换到那个月 */
 function trendChart(ov) {
   const first = ov.months[ov.months.length - 1] || "";
-  const t = ov.trend.filter((x) => x.month >= first), W = 720, H = 156, top = 14, bot = 22, gap = 14;
-  // 一两个月的大额会把别的月压扁：纵轴最高取有数据月份中位数的 3 倍，超出的顶格画、顶上写实际金额
-  const vals = t.map((x) => x.consume).filter((v) => v > 0).sort((a, b) => a - b);
-  const real = Math.max(1, ...t.map((x) => x.consume)), mid = vals.length ? vals[Math.floor(vals.length / 2)] : 1;
-  const max = vals.length >= 4 && real > mid * 3 ? mid * 3 : real;
-  const slots = Math.max(t.length, 6), bw = (W - gap * (slots - 1)) / slots, h = (v) => (Math.min(v, max) / max) * (H - top - bot);
-  const bars = t.map((x, i) => {
-    const x0 = i * (bw + gap), hh2 = x.consume ? Math.max(2, h(x.consume)) : 0, cut = x.consume > max;
-    const tip = `${monthLabel(x.month)}\n${tr("消费")} ${yuan(x.consume)}\n${tr("支出")} ${yuan(x.out)}\n${tr("收入")} ${yuan(x.income)}`;
-    return `<g class="tr-m${x.month === ov.period ? " is-on" : ""}" ${x.has ? `data-month="${x.month}"` : ""}><title>${esc(tip)}</title>
-      <rect class="tr-hit" x="${x0 - gap / 2}" y="0" width="${bw + gap}" height="${H}"/>
-      ${hh2 ? `<rect class="tr-c" x="${x0}" y="${H - bot - hh2}" width="${bw}" height="${hh2}" rx="2"/>` : ""}
-      ${cut ? `<path class="tr-cut" d="M${x0 - 2} ${top + 6} l${bw / 2 + 2} -5 l${bw / 2 + 2} 5"/><text class="tr-v" x="${x0 + bw / 2}" y="${top - 2}">${yuanRound(x.consume)}</text>` : ""}
-      <text class="tr-l" x="${x0 + bw / 2}" y="${H - 6}">${+x.month.slice(5)}</text></g>`;
-  }).join("");
-  return `<div class="bill-trend"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${tr("近 12 个月的消费")}">${bars}</svg></div>`;
+  const cols = ov.trend.filter((x) => x.month >= first).map((x) => ({
+    total: x.consume, by: x.by, label: +x.month.slice(5), cls: x.month === ov.period ? "is-on" : "", attrs: x.has ? `data-month="${x.month}"` : "disabled",
+    tip: ctTip(monthLabel(x.month), x.consume, x.by, `${tr("支出")} ${yuan(x.out)}\n${tr("收入")} ${yuan(x.income)}`) }));
+  return stackCols(ov, cols, "mn-trend") + ctLegend(ov);
 }
 
-/** 这个月每天的消费：一天一格，越深越多；点一格看那天的明细 */
-function dayCells(ov) {
+/** 这个月每天的消费：一天一根；点一根看那天的明细；账单还没到的日子空着 */
+function dayChart(ov) {
   const m = ov.period, n = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
   const by = Object.fromEntries(ov.days.map((x) => [x.date, x]));
-  const max = Math.max(1, ...ov.days.map((x) => x.consume));
-  const cells = Array.from({ length: n }, (_, i) => {
-    const date = `${m}-${pad2(i + 1)}`, x = by[date], v = x ? x.consume : 0;
-    if (ov.upto && date > ov.upto) return `<span class="bill-day is-later"><span>${i + 1}</span></span>`;
-    const a = v ? 0.12 + 0.88 * Math.sqrt(v / max) : 0;
-    return `<button class="bill-day${v ? "" : " is-zero"}" data-day="${date}" style="--a:${a.toFixed(2)}" title="${esc(`${date.slice(5)} ${weekday(date)}\n${tr("消费")} ${yuan(v)}${x && x.out !== v ? `\n${tr("支出")} ${yuan(x.out)}` : ""}`)}"><span>${i + 1}</span></button>`;
-  }).join("");
-  return `<div class="bill-days">${cells}</div>`;
+  const cols = Array.from({ length: n }, (_, i) => {
+    const date = `${m}-${pad2(i + 1)}`, x = by[date], later = ov.upto && date > ov.upto;
+    const cls = [later ? "is-later" : "", i === 0 || (i + 1) % 5 === 0 ? "is-tick" : ""].filter(Boolean).join(" ");
+    if (later) return { total: 0, label: i + 1, cls, attrs: "disabled", tip: "" };
+    return { total: x ? x.consume : 0, by: x && x.by, label: i + 1, cls, attrs: `data-day="${date}"`,
+      tip: ctTip(`${date.slice(5)} ${weekday(date)}`, x ? x.consume : 0, x && x.by, x && x.out !== x.consume ? `${tr("支出")} ${yuan(x.out)}` : "") };
+  });
+  return stackCols(ov, cols, "mn-days", true) + ctLegend(ov);
 }
 
-const billBar = (share) => `<span class="bill-bar"><i style="width:${Math.max(0, Math.min(100, share * 100)).toFixed(1)}%"></i></span>`;
+/** 消费的占比：一个圆环（颜色同上，「其余」并成一块），中间写合计；右边一行一块 */
+function ctDonut(ov) {
+  const pal = ov.palette || [], tot = Math.max(1, ov.by_ctype.reduce((a, x) => a + x.fen, 0));
+  const rest = ov.by_ctype.filter((x) => !pal.includes(x.name));
+  const parts = [...ov.by_ctype.filter((x) => pal.includes(x.name)).map((x) => ({ name: x.name, fen: x.fen, color: ctColor(ov, x.name) })),
+    ...(rest.length ? [{ name: null, fen: rest.reduce((a, x) => a + x.fen, 0), color: "var(--mn-rest)", members: rest }] : [])];
+  const R = 80, r = 52, C = 84, pt = (rad, a) => `${(C + rad * Math.cos(a)).toFixed(2)} ${(C + rad * Math.sin(a)).toFixed(2)}`;
+  let a0 = -Math.PI / 2;
+  const label = (x) => (x.name == null ? tr("其余") : tr(x.name));
+  const tipOf = (x) => `${label(x)} ${sharePct(x.fen / tot)} · ${yuan(x.fen)}${x.members ? "\n" + x.members.map((m) => `  ${tr(m.name || "未分类")} ${yuan(m.fen)}`).join("\n") : ""}`;
+  const arcs = parts.map((x) => {
+    const sweep = Math.min((x.fen / tot) * 2 * Math.PI, 2 * Math.PI - 1e-4), a1 = a0 + sweep, big = sweep > Math.PI ? 1 : 0;
+    const d = `M${pt(R, a0)}A${R} ${R} 0 ${big} 1 ${pt(R, a1)}L${pt(r, a1)}A${r} ${r} 0 ${big} 0 ${pt(r, a0)}Z`;
+    a0 = a1;
+    return `<path d="${d}" style="fill:${x.color}"${x.name != null ? ` data-ctype="${esc(x.name || "未分类")}"` : ""}><title>${esc(tipOf(x))}</title></path>`;
+  }).join("");
+  const rows = parts.map((x) => `<${x.name != null ? `button data-ctype="${esc(x.name || "未分类")}"` : "div"} class="mn-dl-row" title="${esc(tipOf(x))}"><i style="background:${x.color}"></i><span class="mn-dl-name">${esc(label(x))}${x.members ? `<small>${esc(tr("{n} 类", { n: x.members.length }))}</small>` : ""}</span><span class="mx-num">${sharePct(x.fen / tot)}</span><span class="mx-num">${yuan(x.fen)}</span></${x.name != null ? "button" : "div"}>`).join("");
+  return `<div class="mn-donut"><div class="mn-ring"><svg viewBox="0 0 ${C * 2} ${C * 2}" role="img" aria-label="${tr("消费的占比")}">${arcs}</svg><div class="mn-ring-c"><span>${tr("消费")}</span><b class="mx-num">${yuanRound(tot)}</b></div></div><div class="mn-dl">${rows}</div></div>`;
+}
+
+const billBar = (share, color) => `<span class="bill-bar"><i style="width:${Math.max(0, Math.min(100, share * 100)).toFixed(1)}%${color ? `;background:${color}` : ""}"></i></span>`;
 /** 和前三个月平均比：翻倍以上写倍数（×3.6），否则 +62%／−22% */
 const billVs = (x) => {
   if (x.change == null) return x.avg3 === 0 ? `<span class="bill-new">${tr("新")}</span>` : "—";
@@ -1977,27 +2034,31 @@ function overviewBody(ov) {
   const alerts = ov.alerts.length ? section(tr("值得注意的"), `<div class="bill-alerts">${ov.alerts.map((a, i) =>
     `<button class="bill-alert" data-alert="${i}"><span class="mx-status${a.level === "warn" ? " mx-status--warn" : ""}"></span><span>${esc(a.text)}</span>${a.action === "classify" ? `<span class="bill-alert-act">${MN.busy === "classify" ? tr("在分…") : tr("让 AI 分类")}</span>` : ""}</button>`).join("")}</div>`) : "";
   const trend = section(tr("近 12 个月的消费"), trendChart(ov));
-  const days = ov.is_month && ov.days.length ? section(tr("每天的消费"), dayCells(ov)) : "";
+  const days = ov.is_month && ov.days.length ? section(tr("每天的消费"), dayChart(ov)) : "";
   const tt = ov.by_ttype.length ? section(tr("钱怎么动的"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("交易类型")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("支出")}</th><th class="is-num">${tr("收入")}</th></tr></thead><tbody>
       ${ov.by_ttype.map((x) => `<tr data-ttype="${esc(x.name)}"><td>${esc(tr(x.name))}</td><td class="is-num">${x.n}</td><td class="is-num">${x.out ? yuan(x.out) : "—"}</td><td class="is-num">${x.in ? yuan(x.in) : "—"}</td></tr>`).join("")}</tbody></table></div>`) : "";
-  const ct = ov.by_ctype.length ? section(tr("消费花在哪"), ctypeTable(ov, false)) : "";
+  const ct = ov.by_ctype.length ? ctypeSection(ov, false) : "";
   const ac = ov.accounts.length ? section(tr("从哪个账户付的"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("付款账户")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>
       ${ov.accounts.map((x) => `<tr data-account="${esc(x.name)}"><td>${esc(x.name)}${x.credit ? `<span class="mx-tag">${tr("信用")}</span>` : ""}</td><td class="is-num">${x.n}</td><td class="is-num">${yuan(x.fen)}</td></tr>`).join("")}</tbody></table></div>`,
       { aside: ov.credit != null ? esc(tr("消费里信用付的占 {v}", { v: sharePct(ov.credit) })) : "" }) : "";
   const rc = ov.recurring.length ? section(tr("每月固定扣费"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("对方")}</th><th class="is-num">${tr("月数")}</th><th class="is-num">${tr("每月约")}</th><th class="is-num">${tr("最近一个月")}</th></tr></thead><tbody>
       ${ov.recurring.map((x) => `<tr data-who="${esc(x.name)}"><td title="${esc(x.name)}">${esc(x.name)}${x.new ? `<span class="mx-tag">${tr("新")}</span>` : ""}${x.rise ? `<span class="mx-tag bill-tag-up">${tr("涨了")}</span>` : ""}</td><td class="is-num">${x.months}</td><td class="is-num">${yuan(x.avg)}</td><td class="is-num">${yuan(x.last)}</td></tr>`).join("")}</tbody></table></div>`) : "";
   const bg = ov.budgets.length ? section(tr("预算"), `<div class="bill-budgets">${ov.budgets.map((x) => `<div class="bill-budget"><span>${esc(x.text)}</span>${billBar(x.spent / x.limit)}<span class="mx-num${x.ok ? "" : " bill-up"}">${yuan(x.spent)} / ${yuan(x.limit)}</span></div>`).join("")}</div>`) : "";
-  return ro + `<div class="secs-plain" style="margin-top:var(--space-6)">${ins}${alerts}${trend}${days}${tt}${ct}${ac}${rc}${bg}</div>`;
+  return ro + `<div class="secs-plain" style="margin-top:var(--space-6)">${ins}${trend}${ct}${days}${alerts}${tt}${ac}${rc}${bg}</div>`;
 }
 
-/** 消费类型那张表（概览、分类页共用）；分类页点一行展开近 12 个月和主要商户 */
+/** 「消费花在哪」（概览、分类页共用）：排行（表）和占比（圆环）两种看法，切换只在这一页的内存里 */
+const ctypeSection = (ov, expand) => section(tr("消费花在哪"), MN.view === "share" ? ctDonut(ov) : ctypeTable(ov, expand),
+  { aside: `<span class="mx-seg mn-view" role="tablist">${[["rank", tr("排行")], ["share", tr("占比")]].map(([k, v]) => `<button role="tab" aria-selected="${k === MN.view}" class="${k === MN.view ? "is-on" : ""}" data-view="${k}">${v}</button>`).join("")}</span>` });
+
+/** 消费类型那张表；分类页点一行展开近 12 个月和主要商户 */
 function ctypeTable(ov, expand) {
   const rows = ov.by_ctype.map((x) => {
     const name = x.name || "未分类", open = expand && MN.open === name;
     let detail = "";
     if (open) {
       const mx = Math.max(1, ...x.series);
-      const spark = `<div class="bill-spark">${x.series.map((v, i) => `<i style="height:${Math.max(2, (v / mx) * 44)}px" title="${esc(`${monthLabel(ov.trend[i].month)} ${yuan(v)}`)}"></i>`).join("")}</div>`;
+      const spark = `<div class="bill-spark" style="--c:${ctColor(ov, x.name)}">${x.series.map((v, i) => `<i style="height:${Math.max(2, (v / mx) * 44)}px" title="${esc(`${monthLabel(ov.trend[i].month)} ${yuan(v)}`)}"></i>`).join("")}</div>`;
       const m = new Map();
       for (const b of (MN.data ? MN.data.items : []).filter((b) => b.counted && b.ttype === "消费" && (b.ctype || "未分类") === name)) {
         const w = b.counterparty || b.item; const e = m.get(w) || [0, 0]; e[0] += b.fen - (b.refund_fen || 0); e[1] += 1; m.set(w, e);
@@ -2006,7 +2067,7 @@ function ctypeTable(ov, expand) {
       detail = `<tr class="bill-open"><td colspan="5"><div class="bill-open-in">${spark}<div class="bill-open-top">${top.map(([w, [f, n]]) => `<button data-who="${esc(w)}"><span>${esc(w)}</span><span class="mx-num">${n} · ${yuan(f)}</span></button>`).join("")}
         <button class="mx-btn mx-btn--text mx-btn--sm" data-ctype-list="${esc(name)}">${tr("看这类的明细")}</button></div></div></td></tr>`;
     }
-    return `<tr data-ctype="${esc(name)}"${open ? ' class="is-open"' : ""}><td>${esc(tr(name))}</td><td class="bill-bar-td">${billBar(x.share)}</td><td class="is-num">${sharePct(x.share)}</td><td class="is-num">${ov.is_month ? billVs(x) : x.n}</td><td class="is-num">${yuan(x.fen)}</td></tr>${detail}`;
+    return `<tr data-ctype="${esc(name)}"${open ? ' class="is-open"' : ""}><td>${esc(tr(name))}</td><td class="bill-bar-td">${billBar(x.share, ctColor(ov, x.name))}</td><td class="is-num">${sharePct(x.share)}</td><td class="is-num">${ov.is_month ? billVs(x) : x.n}</td><td class="is-num">${yuan(x.fen)}</td></tr>${detail}`;
   }).join("");
   return `<div class="mx-table-wrap"><table class="mx-table bills-ct"><thead><tr><th>${tr("消费类型")}</th><th class="b-bar"></th><th class="is-num">${tr("占比")}</th><th class="is-num"${ov.upto ? ` title="${esc(tr("每月 1 日到 {d} 日", { d: +ov.upto.slice(8) }))}"` : ""}>${ov.is_month ? (ov.upto ? tr("比前三个月同期") : tr("比前三个月")) : tr("笔数")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -2032,7 +2093,7 @@ function billListBody(d) {
 function billCtypeBody(ov, d) {
   const n = d.unclassified;
   const notice = n ? `<div class="mx-notice"><span>${esc(tr("还有 {n} 笔消费没分好类", { n }))}</span><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ai-cls" title="${tr("只发对方名和说明")}"${MN.busy === "classify" ? " disabled" : ""}>${MN.busy === "classify" ? tr("在分…") : tr("让 AI 分类")}</button></div>` : "";
-  return notice + (MN.err ? `<p class="bill-err">${esc(MN.err)}</p>` : "") + (ov.by_ctype.length ? section(tr("消费花在哪"), ctypeTable(ov, true)) : emptyInline(tr("这段时间没有消费")));
+  return notice + (MN.err ? `<p class="bill-err">${esc(MN.err)}</p>` : "") + (ov.by_ctype.length ? ctypeSection(ov, true) : emptyInline(tr("这段时间没有消费")));
 }
 
 function billWhoBody(d) {
@@ -2060,11 +2121,19 @@ function billImportsBody(d) {
   const xs = d.imports || [];
   const cover = Object.entries(d.coverage).map(([s, c]) => `<div><dt>${esc(BILL_SRC[s] || s)}</dt><dd>${esc(tr("{a}–{b} · {n} 笔", { a: c.first.slice(0, 10), b: c.last.slice(0, 10), n: numText(c.count) }))}</dd></div>`).join("");
   const ok = (x) => !x.check || x.check.ok == null ? "—" : x.check.ok ? `<span class="mx-status mx-status--ok">${tr("对上了")}</span>` : `<span class="mx-status mx-status--warn">${esc(tr("差 {v} 元", { v: yuan(Math.abs(x.check.bill_out - x.check.ours_out) + Math.abs(x.check.bill_in - x.check.ours_in)) }))}</span>`;
-  const table = xs.length ? `<div class="mx-table-wrap"><table class="mx-table bill-imports"><thead><tr><th>${tr("账单")}</th><th class="b-range">${tr("账单里的时间")}</th><th class="is-num b-n">${tr("笔数")}</th><th class="b-chk">${tr("对账")}</th><th class="b-at">${tr("导入时间")}</th></tr></thead><tbody>
-      ${xs.map((x, i) => `<tr data-imp="${i}"><td title="${esc(x.file)}">${esc(tr(x.format))}</td><td class="mx-num">${esc(x.first.slice(0, 10))}–${esc(x.last.slice(0, 10))}</td><td class="is-num">${numText(x.rows)}</td><td>${ok(x)}</td><td class="mx-num">${esc(x.imported_at.slice(0, 16))}</td></tr>`).join("")}</tbody></table></div>`
+  // 重合：这份里有几笔别的账单也有（同一笔按交易号认，只算一次）
+  const dup = (x) => {
+    if (!x.overlap) return "—";
+    const n = x.rows - x.only;
+    return n ? `<span title="${esc(x.overlap.map((o) => `${tr(o.format)} · ${o.export.slice(0, 16)}  ${tr("{n} 笔", { n: numText(o.n) })}`).join("\n"))}">${numText(n)}</span>` : "0";
+  };
+  const table = xs.length ? `<div class="mx-table-wrap"><table class="mx-table bill-imports"><thead><tr><th>${tr("账单")}</th><th class="b-range">${tr("账单里的时间")}</th><th class="is-num b-n">${tr("笔数")}</th><th class="is-num b-n">${tr("重合")}</th><th class="b-chk">${tr("对账")}</th><th class="b-at">${tr("导入时间")}</th></tr></thead><tbody>
+      ${xs.map((x, i) => `<tr data-imp="${i}"><td title="${esc(x.file)}">${esc(tr(x.format))}</td><td class="mx-num">${esc(x.first.slice(0, 10))}–${esc(x.last.slice(0, 10))}</td><td class="is-num">${numText(x.rows)}</td><td class="is-num">${dup(x)}</td><td>${ok(x)}</td><td class="mx-num">${esc(x.imported_at.slice(0, 16))}</td></tr>`).join("")}</tbody></table></div>`
     : emptyInline(tr("之前导入的没有记下文件，再导一次就有"));
+  const rows = xs.reduce((a, x) => a + x.rows, 0), uniq = Object.values(d.coverage).reduce((a, c) => a + c.count, 0);
+  const aside = xs.length > 1 && rows > uniq ? esc(tr("{r} 行，去掉重合的是 {n} 笔", { r: numText(rows), n: numText(uniq) })) : "";
   const rebuild = xs.some((x) => x.stored) ? `<button class="mx-btn mx-btn--text mx-btn--sm" id="bill-rebuild"${MN.busy === "rebuild" ? " disabled" : ""}>${MN.busy === "rebuild" ? tr("在重算…") : tr("从原文件重算")}</button>` : "";
-  return `${cover ? `<dl class="mx-facts bill-cover">${cover}</dl>` : ""}<div class="secs-plain" style="margin-top:var(--space-6)">${section(tr("导入过的账单"), table + `<p class="sum-foot">${rebuild}${howto("bills", tr("怎么导出账单"))}</p>`)}</div>`;
+  return `${cover ? `<dl class="mx-facts bill-cover">${cover}</dl>` : ""}<div class="secs-plain" style="margin-top:var(--space-6)">${section(tr("导入过的账单"), table + `<p class="sum-foot">${rebuild}${howto("bills", tr("怎么导出账单"))}</p>`, { aside })}</div>`;
 }
 
 /** 筛选菜单：第一层一行一个维度（右边灰字是当前值），点进去是这个维度的选项 */
@@ -2166,6 +2235,8 @@ async function renderMoney(arg) {
     const at = (sel) => t.closest(sel);
     let x;
     if ((x = at("[data-add]"))) { x.parentElement.hidden = true; return x.dataset.add === "pick" ? pickBills() : billHowtoDialog(); }
+    if ((x = at("[data-view]"))) { MN.view = x.dataset.view; return drawBillBody(); }
+    if ((x = at(".mn-donut [data-ctype]"))) return billGo({ ctype: x.dataset.ctype });
     if ((x = at("[data-btab]"))) { MN.tab = x.dataset.btab; MN.all = false; MN.open = null; return renderMoney(d.month); }
     if ((x = at("#bill-dir [data-v]"))) { MN.dir = x.dataset.v; MN.all = false; return renderMoney(d.month); }
     if ((x = at("#bill-side [data-v]"))) { MN.side = x.dataset.v; MN.all = false; return renderMoney(d.month); }

@@ -4,7 +4,7 @@ resolver = "2"
 members = ["crates/beayy-core", "crates/beayy-phone", "crates/beayy-capture", "crates/beayy-summary", "crates/beayy-sync", "crates/beayy-remote", "crates/beayy-install", "src-tauri", "setup", "mobile"]
 
 [workspace.package]
-version = "0.2.49"
+version = "0.2.50"
 edition = "2021"
 license = "UNLICENSED"
 

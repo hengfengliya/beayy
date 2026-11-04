@@ -6,8 +6,11 @@
    说话用同样轻重的绿、熬夜用墨线 risk；轨道是不带色偏的中性灰，路上（--rec-go）深一档的灰。
    地点 6 种淡色（--pl-1…6：薰衣草、玫瑰、青、珊瑚、暖石、橄榄），色相避开电脑蓝、手机琥珀、说话绿，按地名固定分配（app.js placeTones）
    每种淡色配一档同色相的实色（--pl-N-s，路上、其他地方是 --rec-go-s）：淡色只作带文字的底，细条和色块边用实色，
-   和轨道、页底的对比不低于 3:1（WCAG 1.4.11，2026-10-30） */
+   和轨道、页底的对比不低于 3:1（WCAG 1.4.11，2026-10-30）
+   收支的图给消费类型上色借地点的实色（--mn-1…5，按这个顺序相邻的色差最大；暖石太灰不用），别的类并成灰色的「其余」（--mn-rest）；
+   用 dataviz 的 validate_palette 查过：相邻色正常视力都分得开，红绿色弱有两对偏近，靠图例和 2px 间隔区分（2026-11-04） */
 :root {
+  --mn-1: var(--pl-3-s); --mn-2: var(--pl-4-s); --mn-3: var(--pl-1-s); --mn-4: var(--pl-6-s); --mn-5: var(--pl-2-s); --mn-rest: var(--rec-go);
   --rec-computer: #2a78d6; --rec-phone: #fab219; --rec-night: #d03b3b; --rec-track: #efefed;
   --rec-watch: #26a269; --rec-place: #dededb; --rec-place-alt: #cbcac6;
   --rec-go: #cbcac6;
@@ -266,32 +269,54 @@ div.tl-row { grid-template-columns: 92px minmax(0, 1fr); }
 .mx-table tr.bill-open:hover td { background: var(--sunken); }
 .bill-open-in { display: flex; gap: var(--space-6); align-items: flex-end; flex-wrap: wrap; }
 .bill-spark { display: flex; gap: 4px; align-items: flex-end; height: 48px; }
-.bill-spark i { display: block; width: 10px; border-radius: 2px; background: var(--ink-3); }
-.bill-spark i:last-child { background: var(--ink); }
+.bill-spark i { display: block; width: 10px; border-radius: 2px; background: var(--c, var(--ink-3)); opacity: 0.45; }
+.bill-spark i:last-child { opacity: 1; }
 .bill-open-top { display: flex; flex-direction: column; gap: 2px; min-width: 240px; flex: 1; }
 .bill-open-top > button:not(.mx-btn) { display: flex; justify-content: space-between; gap: var(--space-4); padding: 4px 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink); font: 13px/18px var(--font-sans); text-align: left; cursor: pointer; }
 .bill-open-top > button:not(.mx-btn):hover { background: var(--hover); }
 .bill-open-top .mx-btn { align-self: flex-start; margin-top: 4px; }
 /* 近 12 个月的消费：墨色柱，截断的顶上写实际金额 */
-.bill-trend svg { display: block; width: 100%; height: 168px; overflow: visible; }
-.bill-trend .tr-c { fill: var(--ink); }
-.bill-trend .tr-hit { fill: transparent; }
-.bill-trend .tr-m[data-month] { cursor: pointer; }
-.bill-trend .tr-m[data-month]:hover .tr-hit, .bill-trend .tr-m.is-on .tr-hit { fill: var(--hover); }
-.bill-trend .tr-l { fill: var(--ink-4); font: 11px var(--font-sans); text-anchor: middle; }
-.bill-trend .tr-cut { fill: none; stroke: var(--page); stroke-width: 3; }
-.bill-trend .tr-v { fill: var(--ink-2); font: 11px var(--font-sans); font-variant-numeric: tabular-nums; text-anchor: middle; }
-.bill-trend .tr-m.is-on .tr-l { fill: var(--ink); font-weight: 600; }
-/* 每天的消费：一天一格，越深越多 */
-.bill-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); gap: 4px; }
-.bill-day { position: relative; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ink) calc(var(--a) * 100%), transparent); cursor: pointer; }
-.bill-day span { font: 11px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink-3); }
-.bill-day:not(.is-zero) span { color: color-mix(in srgb, var(--page) calc(var(--a) * 160%), var(--ink-3)); }
-.bill-day:hover { border-color: var(--ink-3); }
-.bill-day.is-later { display: grid; place-items: center; border-style: dashed; background: none; cursor: default; }
-.bill-day.is-later span { color: var(--ink-4); }
-.bill-day.is-later:hover { border-color: var(--line); }
-/* 值得注意的 */
+/* 收支的竖柱：每根按消费类型堆起来，类和类之间留 2px（透明边，悬停的底色透过来）；截断的柱顶上写金额 */
+.mn-cols { display: flex; gap: var(--space-2); }
+.mn-col { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; }
+.mn-col:disabled { cursor: default; }
+.mn-col:not(:disabled):hover, .mn-col.is-on { background: var(--hover); }
+.mn-stack { position: relative; display: flex; flex-direction: column-reverse; width: min(28px, 64%); height: 120px; box-shadow: 0 1px 0 var(--line); }
+.mn-stack i { display: block; flex: none; box-sizing: border-box; }
+.mn-stack i + i { border-bottom: 2px solid transparent; background-clip: padding-box; }
+.mn-stack i:last-child { border-radius: 3px 3px 0 0; }
+.mn-stack.is-cut::after { content: ""; position: absolute; left: -3px; right: -3px; top: 10px; height: 3px; background: var(--page); transform: skewY(-14deg); }
+.mn-col:hover .mn-stack.is-cut::after, .mn-col.is-on .mn-stack.is-cut::after { background: color-mix(in srgb, var(--ink) 5%, var(--page)); }
+.mn-cut { position: absolute; top: 2px; font-size: 11px; line-height: 14px; color: var(--ink-2); white-space: nowrap; }
+.mn-l { padding-bottom: 4px; font: 11px/14px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink-4); }
+.mn-col.is-on .mn-l { color: var(--ink); font-weight: 600; }
+.mn-days { gap: 2px; }
+.mn-days .mn-col { padding-top: 16px; }
+.mn-days .mn-stack { width: min(14px, 72%); height: 72px; }
+.mn-days .mn-col.is-later .mn-l { color: var(--ink-disabled); }
+.mn-legend { margin-top: var(--space-3); gap: var(--space-4); }
+.mn-view { height: 28px; }
+.mn-view button { padding: 0 8px; font-size: 13px; }
+
+/* 占比：圆环（块和块之间 2px 页底色），中间写合计，右边一行一块 */
+.mn-donut { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: var(--space-6); align-items: center; }
+.mn-ring { position: relative; width: 168px; height: 168px; }
+.mn-ring svg { display: block; width: 100%; height: 100%; }
+.mn-ring path { stroke: var(--page); stroke-width: 2; stroke-linejoin: round; }
+.mn-ring path[data-ctype] { cursor: pointer; }
+.mn-ring path[data-ctype]:hover { opacity: 0.85; }
+.mn-ring-c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.mn-ring-c span { font-size: 12px; line-height: 16px; color: var(--ink-3); }
+.mn-ring-c b { font-size: 18px; line-height: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.mn-dl { display: flex; flex-direction: column; }
+.mn-dl-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 48px 112px; align-items: center; gap: var(--space-3); padding: 8px; border: 0; border-bottom: 1px solid var(--line-2); background: none; color: var(--ink); font: 14px/20px var(--font-sans); text-align: left; }
+button.mn-dl-row { cursor: pointer; }
+button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-md); }
+.mn-dl-row i { width: 10px; height: 10px; border-radius: 2px; }
+.mn-dl-row .mx-num { text-align: right; }
+.mn-dl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn-dl-name small { margin-left: var(--space-2); font-size: 12px; color: var(--ink-3); }
+
 .bill-alerts { display: flex; flex-direction: column; }
 .bill-alert { display: flex; align-items: center; gap: var(--space-3); padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line-2); background: none; color: var(--ink); font: 14px/20px var(--font-sans); text-align: left; cursor: pointer; }
 .bill-alert:hover { background: var(--hover); border-radius: var(--radius-md); }
@@ -320,9 +345,11 @@ div.tl-row { grid-template-columns: 92px minmax(0, 1fr); }
 .bill-raw { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--space-4); margin: 0; font-size: 13px; }
 .bill-raw dt { color: var(--ink-4); }
 .bill-raw dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.bill-del { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.bill-del-btn { color: var(--risk-ink); }
 .bill-meta { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); user-select: text; }
 @media (max-width: 1099px) { #bill-body .readouts .v { font-size: 24px; } .mx-table.bills .b-method, .mx-table.bills td:nth-child(5) { display: none; } .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child) { width: 96px; } .mx-table.bills-who .b-time { width: 56px; } .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 88px; } .bill-budget { grid-template-columns: minmax(0, 1fr) 120px; } .bill-budget .bill-bar { display: none; } }
-@media (max-width: 759px) { .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child), .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 72px; } .mx-table.bills .b-time { width: 88px; } .mx-table.bills .b-amt { width: 96px; } .mx-table.bills th:nth-child(3), .mx-table.bills td:nth-child(3), .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(6) { display: none; } .mx-table.bill-imports .b-range, .mx-table.bill-imports td:nth-child(2), .mx-table.bill-imports .b-at, .mx-table.bill-imports td:nth-child(5) { display: none; } .mx-table.bills-ct .b-bar, .mx-table.bills-ct td:nth-child(2) { display: none; } }
+@media (max-width: 759px) { .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child), .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 72px; } .mx-table.bills .b-time { width: 88px; } .mx-table.bills .b-amt { width: 96px; } .mx-table.bills th:nth-child(3), .mx-table.bills td:nth-child(3), .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(6) { display: none; } .mx-table.bill-imports .b-range, .mx-table.bill-imports td:nth-child(2), .mx-table.bill-imports .b-at, .mx-table.bill-imports td:nth-child(6) { display: none; } .mx-table.bills-ct .b-bar, .mx-table.bills-ct td:nth-child(2) { display: none; } .mn-donut { grid-template-columns: 1fr; justify-items: center; } .mn-dl { width: 100%; } .mn-days .mn-col:not(.is-tick) .mn-l { visibility: hidden; } .mn-cols { gap: 4px; } .mn-days { gap: 1px; } }
 /* 设置「数据」页的表 */
 .mx-table.store th:last-child { width: 32%; }
 .mx-table.store .num { width: 15%; text-align: right; }

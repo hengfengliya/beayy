@@ -84,6 +84,9 @@ pub struct Import {
     /// 账单自带的合计和我们算的：{bill_in, bill_out, ours_in, ours_out, n_in, n_out, bill_n_in, bill_n_out, ok}（分、笔）
     #[serde(default)]
     pub check: Value,
+    /// 这份里每一笔的 id：算和别的账单重合几笔（不给网页）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
 }
 
 fn dir() -> PathBuf {
@@ -436,6 +439,7 @@ pub fn import_bills(paths: Vec<String>) -> Value {
                 let last = parsed.bills.iter().map(|b| b.time.clone()).max().unwrap_or_default();
                 let check = file_check(parsed.src, &parsed.meta, &parsed.bills);
                 let stored = archive(parsed.src, &parsed.export, path).unwrap_or_default();
+                let ids = parsed.bills.iter().map(|b| b.id.clone()).collect();
                 let (a, c) = merge_into(&mut all, parsed.bills);
                 // 同一份（同格式、同导出时刻）再导一次：换掉旧的那条记录
                 imports.retain(|x| !(x.format == parsed.format && x.export == parsed.export));
@@ -453,6 +457,7 @@ pub fn import_bills(paths: Vec<String>) -> Value {
                     meta: parsed.meta,
                     stored,
                     check,
+                    ids,
                 });
                 added += a;
                 changed += c;
@@ -515,31 +520,106 @@ pub fn coverage(all: &BTreeMap<String, Bill>) -> Value {
     cover.into_iter().map(|(k, (first, last, export, n))| (k, json!({"first": first, "last": last, "export": export, "count": n}))).collect::<serde_json::Map<_, _>>().into()
 }
 
-/// 从存下的原文件把账单全部重算一遍（解析规则改过以后用）。每份导入都存了原文件就从头算，有没存的就并进现有的
-#[tauri::command(async)]
-pub fn rebuild_bills() -> Value {
-    let mut imps = imports();
-    imps.sort_by(|a, b| a.export.cmp(&b.export));
-    let missing = imps.iter().filter(|x| x.stored.is_empty() || !dir().join(&x.stored).exists()).count();
-    let mut all = if missing == 0 { BTreeMap::new() } else { load(&store_path()) };
+fn has_file(x: &Import) -> bool {
+    !x.stored.is_empty() && dir().join(&x.stored).exists()
+}
+
+/// 把存了原文件的几份按导出早晚依次并进 all，顺手记下每份的 ids：返回（并了几份，错在哪）
+fn replay(imps: &mut [Import], all: &mut BTreeMap<String, Bill>) -> (usize, Vec<String>) {
+    let mut order: Vec<usize> = (0..imps.len()).filter(|i| has_file(&imps[*i])).collect();
+    order.sort_by(|a, b| imps[*a].export.cmp(&imps[*b].export));
     let (mut files, mut errors) = (0, vec![]);
-    for x in imps.iter().filter(|x| !x.stored.is_empty()) {
-        let path = dir().join(&x.stored);
-        match table(&path).and_then(|rows| parse_rows(&rows, &x.export)) {
+    for i in order {
+        let x = &mut imps[i];
+        match table(&dir().join(&x.stored)).and_then(|rows| parse_rows(&rows, &x.export)) {
             Ok(p) => {
-                merge_into(&mut all, p.bills);
+                x.ids = p.bills.iter().map(|b| b.id.clone()).collect();
+                merge_into(all, p.bills);
                 files += 1;
             }
             Err(e) => errors.push(format!("{}：{e}", x.file)),
         }
     }
+    (files, errors)
+}
+
+/// 从存下的原文件把账单全部重算一遍（解析规则改过以后用）。每份导入都存了原文件就从头算，有没存的就并进现有的
+#[tauri::command(async)]
+pub fn rebuild_bills() -> Value {
+    let mut imps = imports();
+    let missing = imps.iter().filter(|x| !has_file(x)).count();
+    let mut all = if missing == 0 { BTreeMap::new() } else { load(&store_path()) };
+    let (files, mut errors) = replay(&mut imps, &mut all);
     if files == 0 {
         return json!({"files": 0, "bills": all.len(), "missing": missing, "errors": errors});
     }
-    if let Err(e) = save(&store_path(), &all) {
+    if let Err(e) = save(&store_path(), &all).and_then(|_| write_json(&imports_path(), &imps)) {
         errors.push(format!("存不下：{e}"));
     }
     json!({"files": files, "bills": all.len(), "missing": missing, "errors": errors})
+}
+
+/// 删掉一份导入的账单：去掉这条记录和存下的原文件，用剩下几份的原文件把账单从头算一遍，只在这份里的那些笔就没了。
+/// 剩下的里有没存原文件的，从头算会把它们丢掉，所以不删
+#[tauri::command(async)]
+pub fn delete_bill_import(format: String, export: String) -> Result<Value, String> {
+    let mut imps = imports();
+    let i = imps.iter().position(|x| x.format == format && x.export == export).ok_or("找不到这份账单")?;
+    let gone = imps.remove(i);
+    if let Some(x) = imps.iter().find(|x| !has_file(x)) {
+        return Err(format!("「{}」没存原文件，删了这份没法重算：先把它再导一次", x.file));
+    }
+    let before = load(&store_path()).len();
+    let mut all = BTreeMap::new();
+    let (_, errors) = replay(&mut imps, &mut all);
+    if !errors.is_empty() {
+        return Err(errors.join("；"));
+    }
+    save(&store_path(), &all)?;
+    write_json(&imports_path(), &imps)?;
+    if !gone.stored.is_empty() && !imps.iter().any(|x| x.stored == gone.stored) {
+        let _ = fs::remove_file(dir().join(&gone.stored));
+    }
+    Ok(json!({"bills": all.len(), "removed": before.saturating_sub(all.len())}))
+}
+
+/// 导入页的每份账单（不带 ids）：和同一来源别的账单重合几笔（同一笔按交易号认，只算一次）、只在这份里的几笔。
+/// 之前导入的没记 ids，有原文件就补上
+pub fn imports_view() -> Vec<Value> {
+    let mut imps = imports();
+    let todo: Vec<usize> = (0..imps.len()).filter(|i| imps[*i].ids.is_empty() && has_file(&imps[*i])).collect();
+    if !todo.is_empty() {
+        for &i in &todo {
+            let x = &mut imps[i];
+            if let Ok(p) = table(&dir().join(&x.stored)).and_then(|rows| parse_rows(&rows, &x.export)) {
+                x.ids = p.bills.iter().map(|b| b.id.clone()).collect();
+            }
+        }
+        let _ = write_json(&imports_path(), &imps);
+    }
+    let sets: Vec<std::collections::HashSet<&str>> = imps.iter().map(|x| x.ids.iter().map(String::as_str).collect()).collect();
+    imps.iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let mut j = serde_json::to_value(x).unwrap_or_default();
+            if let Some(o) = j.as_object_mut() {
+                o.remove("ids");
+            }
+            if x.ids.is_empty() {
+                return j;
+            }
+            let others: Vec<usize> = (0..imps.len()).filter(|k| *k != i && imps[*k].src == x.src).collect();
+            j["overlap"] = others
+                .iter()
+                .filter_map(|&k| {
+                    let n = sets[i].intersection(&sets[k]).count();
+                    (n > 0).then(|| json!({"file": imps[k].file, "format": imps[k].format, "export": imps[k].export, "n": n}))
+                })
+                .collect();
+            j["only"] = json!(sets[i].iter().filter(|id| !others.iter().any(|&k| sets[k].contains(*id))).count());
+            j
+        })
+        .collect()
 }
 
 /// 原文件存一份：bills/files/<来源>/<导出时刻>_<内容哈希前 8 位>_<文件名>，同样内容的已经有了就不再存

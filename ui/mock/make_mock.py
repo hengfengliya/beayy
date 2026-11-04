@@ -865,7 +865,7 @@ def make_bills():
     run("import_bills", str(wf), str(af))
     last = TODAY.isoformat()[:7]
     (root / "bills" / "insights").mkdir(parents=True, exist_ok=True)
-    (root / "bills" / "insights" / f"{last}.md").write_text("## 钱去哪了\n\n这个月大头是房租和一台相机，吃饭主要在老街面馆和外卖。\n\n## 和以前比\n\n消费比前三个月平均多，主要多在数码电器（相机）；其他几类和平时差不多。\n\n## 建议\n\n- 外卖多在晚上 11 点以后，试试给外卖设个每月预算\n- 云盘和音乐会员每月固定扣，看看还用不用", encoding="utf-8")
+    (root / "bills" / "insights" / f"{last}.md").write_text("## 发现\n\n- **这个月多花的钱几乎都是那台相机，日常开销没怎么变。** 去掉相机，消费和前三个月同期差不多，每笔平均 40 元上下。\n- **外卖越来越往深夜挪。** 23 点以后下的单多是美团外卖，那几晚你也在电脑前待得更晚。\n- **钱很集中：房租和健身私教占了消费的一半以上。** 这两项每月固定，剩下的才是能调的。\n\n## 建议\n\n- 给外卖设个每月 600 元的上限，23 点以后先别下单\n- 云盘和音乐会员每月固定扣，看看还用不用", encoding="utf-8")
     gb, ov, one = {}, {}, {}
     data = run("get_bills")
     for m in data["years"] + data["months"]:

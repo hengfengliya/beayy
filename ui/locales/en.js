@@ -1057,5 +1057,19 @@ window.I18N_EN = {
   "充值缴费": "Bills & top-ups",
   "保险": "Insurance",
   "互助保障": "Mutual aid",
-  "公益捐赠": "Donations"
+  "公益捐赠": "Donations",
+  "{n} 笔": {"one": "{n} transaction", "other": "{n} transactions"},
+  "{n} 类": {"one": "{n} type", "other": "{n} types"},
+  "{r} 行，去掉重合的是 {n} 笔": "{r} rows, {n} transactions without overlaps",
+  "其余": "Rest",
+  "删除这份账单": "Delete this statement",
+  "删除这份账单？": "Delete this statement?",
+  "只在这份里": "Only in this one",
+  "只在这份里的 {n} 笔会一起删掉。": {"one": "The {n} transaction found only in this one goes with it.", "other": "The {n} transactions found only in this one go with it."},
+  "只在这份里的那些笔会一起删掉。": "Transactions found only in this one go with it.",
+  "这份里的每一笔别的账单都有，删了不少记录。": "Every transaction here is also in another statement, so nothing is lost.",
+  "和别的账单重合": "Also in other statements",
+  "排行": "Ranking",
+  "消费的占比": "Share of spending",
+  "重合": "Overlap"
 };
