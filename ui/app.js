@@ -47,6 +47,8 @@ async function call(cmd, args = {}) {
     case "open_permission": case "open_data_dir": console.info(`样例模式：${cmd}`, args); return null;
     case "list_fonts": return [["PingFang SC", "苹方-简"], ["Songti SC", "宋体-简"], ["Kaiti SC", "楷体-简"], ["Hiragino Sans GB", "冬青黑体简体中文"], ["Helvetica Neue", "Helvetica Neue"], ["Avenir Next", "Avenir Next"], ["Georgia", "Georgia"], ["Menlo", "Menlo"], ["Courier New", "Courier New"], ["Times New Roman", "Times New Roman"]].map(([family, name]) => ({ family, name }));
     case "get_rules": return mockState.rules || loadMock("get_rules");
+    case "get_bills": { const all = await loadMock("get_bills"); return all[args.month] || all[Object.keys(all).sort().pop()]; }
+    case "pick_bill_files": return [];
     case "get_settings": {
       const s = mockState.settings || await loadMock("get_settings");
       if (mockState.hasKey) s.has_api_key = true;
@@ -215,7 +217,7 @@ const howto = (kind, text) => `<button type="button" class="howto" data-howto="$
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-howto]"); if (!b) return;
   e.preventDefault(); e.stopPropagation();
-  ({ screentime: screenTimeDialog, amap: amapHowtoDialog })[b.dataset.howto]?.();
+  ({ screentime: screenTimeDialog, amap: amapHowtoDialog, bills: billHowtoDialog })[b.dataset.howto]?.();
 }, true);
 
 /** iCloud 屏幕使用时间怎么同步到这台 Mac：四步＋打开系统设置、现在读取 */
@@ -805,6 +807,9 @@ function renderSide() {
   // 手机版不采集，没有权限、暂停这些
   const bad = !st.mobile && (st.paused || !perm.accessibility || !perm.input_monitoring || !st.capturing);
   const dot = document.getElementById("dev-dot");
+  // 账单只在电脑上导入、存在电脑上，手机版没有收支页
+  const money = document.querySelector('#nav [data-page="money"]');
+  if (money) money.hidden = !!st.mobile;
   if (dot) { dot.hidden = !bad; dot.title = st.paused ? tr("已暂停") : tr("没在记录或缺权限"); }
   const pf = S.profile || { name: tr("我") };
   const av = document.getElementById("me-avatar");
@@ -1761,6 +1766,92 @@ async function renderMonth(arg) {
   bindTabs(date);
   bindGen("gen-monthly", "generate_monthly", date, () => renderMonth(date));
   $app.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => { location.hash = `#/summary/month/${b.dataset.month}`; }));
+}
+
+// ---------- 收支：导入的微信、支付宝账单（app/src-tauri/src/bills.rs） ----------
+
+const MN = { dir: "out", all: false };
+const yuan = (f) => (f / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** 读数的大数字取整元（精确的放悬停） */
+const yuanRound = (f) => Math.round(f / 100).toLocaleString("en-US");
+const BILL_SRC = { alipay: tr("支付宝"), wechat: tr("微信") };
+const monthLabel = (m) => (LANG === "zh" ? `${+m.slice(0, 4)} 年 ${+m.slice(5, 7)} 月` : new Date(+m.slice(0, 4), +m.slice(5, 7) - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" }));
+
+/** 怎么从微信、支付宝导出账单 */
+function billHowtoDialog() {
+  openDialog({ title: tr("导出账单"), cancel: tr("关闭"), body: `<ol class="steps">
+      <li>${tr("微信：我 → 服务 → 钱包 → 账单 → 下载账单 → 用于个人对账")}</li>
+      <li>${tr("支付宝：我的 → 账单 → 右上角「…」→ 开具交易流水证明 → 用于个人对账")}</li>
+      <li>${tr("账单发到邮箱，是加密的压缩包，密码在微信支付、支付宝发给你的消息里")}</li>
+      <li>${tr("解压后把 csv、xlsx 拖进这个窗口，或点「导入账单」")}</li></ol>` });
+}
+
+async function importBills(paths) {
+  if (!paths || !paths.length) return;
+  const r = await call("import_bills", { paths });
+  const line = (f) => f.error ? `<li><b>${esc(f.name)}</b><br><span class="bill-err">${esc(f.error)}</span></li>`
+    : `<li><b>${esc(f.name)}</b><br>${esc(tr("{src} · {n} 笔，新增 {a}，更新 {u}", { src: tr(f.format), n: f.rows, a: f.added, u: f.updated }))}</li>`;
+  openDialog({ title: tr("导入账单"), cancel: tr("关闭"), body: `<ul class="steps">${r.files.map(line).join("")}</ul>${r.error ? `<p class="mx-error">${esc(r.error)}</p>` : ""}` });
+  if (S.page === "money") renderMoney(MN.month);
+}
+
+async function pickBills() {
+  importBills(await call("pick_bill_files"));
+}
+
+// 账单文件拖进窗口就导入（Tauri 的拖放事件给的是本机路径）
+if (TAURI && window.__TAURI__.event) window.__TAURI__.event.listen("tauri://drag-drop", (e) => {
+  const paths = ((e.payload && e.payload.paths) || []).filter((p) => /\.(csv|xlsx|zip)$/i.test(p));
+  if (paths.length && S.page === "money") importBills(paths);
+});
+
+async function renderMoney(arg) {
+  const tk = RT.seq;
+  const d = await call("get_bills", { month: /^\d{4}-\d{2}$/.test(arg || "") ? arg : null });
+  MN.month = d.month;
+  const has = Object.keys(d.coverage || {}).length > 0;
+  const importBtn = `<button class="mx-btn mx-btn--primary" id="bill-import">${tr("导入账单")}</button>`;
+  if (!has) {
+    if (stale(tk)) return; $app.innerHTML = header(tr("收支")) + `<div class="reading">${emptyBlock("notebook", tr("导入微信、支付宝的账单，看每个月花在哪"), `<div class="empty-acts">${importBtn}${howto("bills", tr("怎么导出账单"))}</div>`)}</div>`;
+    document.getElementById("bill-import").onclick = pickBills;
+    return;
+  }
+  const months = [...new Set([localDay().slice(0, 7), ...d.months])].sort().reverse();
+  const i = months.indexOf(d.month), prev = months[i + 1], next = i > 0 ? months[i - 1] : null;
+  const right = `<div class="daynav"><button class="dn-step" aria-label="${tr("前一个月")}" title="${tr("前一个月")}" ${prev ? `data-month="${prev}"` : "disabled"}>${ICON.chevL}</button>
+      <span class="dn-date">${monthLabel(d.month)}</span>
+      <button class="dn-step" aria-label="${tr("后一个月")}" title="${tr("后一个月")}" ${next ? `data-month="${next}"` : "disabled"}>${ICON.chevR}</button></div>`;
+  const tabs = `<div class="mx-seg" role="tablist" id="bill-dir">${[["out", tr("支出")], ["in", tr("收入")], ["all", tr("全部")]].map(([k, v]) =>
+    `<button role="tab" aria-selected="${k === MN.dir}" class="${k === MN.dir ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
+  const ro = `<div class="readouts">
+      ${readout(tr("支出"), yuanRound(d.spend_fen), tr("元"), yuan(d.spend_fen), false, d.refund_fen ? tr("已扣退款 {v} 元", { v: yuan(d.refund_fen) }) : "")}
+      ${readout(tr("收入"), yuanRound(d.income_fen), tr("元"), yuan(d.income_fen))}
+      ${readout(tr("结余"), (d.income_fen < d.spend_fen ? "−" : "") + yuanRound(Math.abs(d.income_fen - d.spend_fen)), tr("元"), yuan(d.income_fen - d.spend_fen))}
+      ${readout(tr("笔数"), numText(d.count), tr("笔"), "", false, tr("不含不计收支、退款"))}
+    </div>`;
+  const to = MN.dir === "out" && d.to.length ? section(tr("去向"), `<div class="mx-table-wrap"><table class="mx-table bills-to"><thead><tr><th>${tr("对方")}</th><th class="is-num">${tr("笔数")}</th><th class="is-num">${tr("金额")}</th></tr></thead><tbody>
+      ${d.to.map((t) => `<tr><td title="${esc(t.name)}">${esc(t.name || tr("未写对方"))}</td><td class="is-num">${t.count}</td><td class="is-num">${yuan(t.spend_fen)}</td></tr>`).join("")}</tbody></table></div>`) : "";
+  const rows = d.items.filter((b) => MN.dir === "all" || (b.counted && b.dir === MN.dir));
+  const shown = MN.all ? rows : rows.slice(0, 100);
+  const amount = (b) => {
+    const sign = b.dir === "out" ? "−" : b.dir === "in" ? "+" : "";
+    const full = b.refund_fen && b.refund_fen >= b.fen, part = b.refund_fen && !full;
+    const tip = full ? tr("已全额退款") : part ? tr("已退 {v} 元", { v: yuan(b.refund_fen) }) : "";
+    return `<td class="is-num${full ? " bill-void" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${sign}${yuan(b.fen)}${part ? `<small>${esc(tr("退 {v}", { v: yuan(b.refund_fen) }))}</small>` : ""}</td>`;
+  };
+  const cover = Object.entries(d.coverage).map(([k, c]) => tr("{src}至 {d}", { src: BILL_SRC[k] || k, d: c.last.slice(0, 10) })).join(" · ");
+  const table = rows.length ? `<div class="mx-table-wrap"><table class="mx-table bills"><thead><tr><th class="b-time">${tr("时间")}</th><th>${tr("对方")}</th><th>${tr("说明")}</th><th class="b-cat">${tr("分类")}</th><th class="b-src">${tr("来源")}</th><th class="is-num b-amt">${tr("金额")}</th></tr></thead><tbody>
+      ${shown.map((b) => `<tr${b.counted ? "" : ' class="bill-muted"'}><td class="mx-num">${esc(b.time.slice(5, 16))}</td><td title="${esc(b.counterparty)}">${esc(b.counterparty)}</td><td title="${esc([b.item, b.status, b.note].filter(Boolean).join(" · "))}">${esc(b.item)}</td><td>${esc(b.category)}</td><td>${esc(BILL_SRC[b.src] || b.src)}</td>${amount(b)}</tr>`).join("")}</tbody></table></div>
+      ${rows.length > shown.length ? `<button class="mx-btn mx-btn--secondary mx-btn--sm bills-more" id="bill-more">${tr("显示全部 {n} 笔", { n: rows.length })}</button>` : ""}`
+    : emptyInline(tr("这个月没有记录"));
+  if (stale(tk)) return; $app.innerHTML = header(tr("收支"), importBtn) + `<div class="toolbar">${tabs}<div class="toolbar-right">${right}</div></div><div class="reading">
+    ${ro}
+    <div class="secs-plain" style="margin-top:var(--space-6)">${to}${section(tr("明细"), table, { aside: esc(cover) })}</div></div>`;
+  document.getElementById("bill-import").onclick = pickBills;
+  $app.querySelectorAll("[data-month]").forEach((b) => (b.onclick = () => { MN.all = false; location.hash = `#/money/${b.dataset.month}`; }));
+  document.getElementById("bill-dir").onclick = (e) => { const b = e.target.closest("[data-v]"); if (!b) return; MN.dir = b.dataset.v; MN.all = false; renderMoney(d.month); };
+  const more = document.getElementById("bill-more");
+  if (more) more.onclick = () => { MN.all = true; renderMoney(d.month); };
 }
 
 // ---------- 规矩 ----------
@@ -3160,7 +3251,7 @@ async function route() {
   const [page = "today", arg, arg2] = location.hash.replace(/^#\/?/, "").split("/");
   // 换页就关掉弹层；刚拿到恢复码那个必须点「我已存好」才关
   if (DLG && DLG.closable) closeDialog();
-  S.page = ["today", "summary", "rules", "devices", "settings"].includes(page) ? page : "today";
+  S.page = ["today", "summary", "money", "rules", "devices", "settings"].includes(page) ? page : "today";
   markNav(S.page);
   try {
     if (!S.days.length && !S.status) await boot();
@@ -3175,6 +3266,7 @@ async function route() {
     if (snap && $app.dataset.key !== key) { $app.innerHTML = snap; document.getElementById("main").scrollTop = 0; }
     $app.classList.add(snap ? "is-stale" : "is-wait");
     if (S.page === "summary") await renderSummary(arg, arg2);
+    else if (S.page === "money") await renderMoney(arg);
     else if (S.page === "rules") await renderRules();
     else if (S.page === "devices") { if (arg) await renderDevice(decodeURIComponent(arg), arg2); else { DEV.id = null; stopEventsTimer(); await renderDevices(); } }
     else if (S.page === "settings") await renderSettings();

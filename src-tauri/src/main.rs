@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod amap;
+mod bills;
 mod storage;
 mod daily;
 mod data;
@@ -421,6 +422,8 @@ fn main() {
             Some("get_week") => daily::get_week(args.get(3).cloned().unwrap_or_default()).unwrap_or_else(|e| json!({ "error": e })),
             Some("get_month") => daily::get_month(args.get(3).cloned().unwrap_or_default()).unwrap_or_else(|e| json!({ "error": e })),
             Some("llm_usage") => data::llm_usage(),
+            Some("get_bills") => bills::get_bills(args.get(3).cloned()),
+            Some("import_bills") => bills::import_bills(args[3..].to_vec()),
             Some("cloud_round") => match beayy_remote::cloud::round(&mut Relay::default(), &data_root(), Duration::from_secs(600)) {
                 Ok(n) => json!({"added": n.added, "places": n.places, "health": n.health, "transcribed": n.transcribed, "fetched": n.fetched, "deleted": n.deleted, "waiting": n.waiting, "errors": n.errors}),
                 Err(e) => json!({"error": e}),
@@ -448,6 +451,7 @@ fn main() {
             get_status, phone_read_now, set_paused, set_login_item, quit_app, open_permission, open_data_dir, dev_report,
             data::list_days, data::get_day, data::get_rules, data::save_rules,
             data::get_settings, data::save_settings, storage::storage_stats, data::llm_status, data::set_api_key, data::set_relay_token, data::delete_since, data::list_devices, data::rename_device, data::set_place_label, data::recent_events, data::set_place_pick, data::clear_place_pick, data::list_place_labels, data::place_stats, data::edit_place_label, amap::set_amap_key, amap::amap_around, amap::amap_search, amap::amap_map, amap::amap_js_config, amap::set_amap_js, icons::get_icons, daily::generate_daily, daily::daily_status, daily::get_week, daily::generate_weekly, daily::get_month, daily::generate_monthly, data::get_range, data::llm_usage, data::test_model, fonts::list_fonts,
+            bills::import_bills, bills::pick_bill_files, bills::get_bills,
             data::get_profile, data::save_profile, data::list_projects, data::merge_project, data::set_project_domain,
             sync::sync_status, sync::sync_now,
             sync::account_signup, sync::account_login, sync::account_claim, sync::account_recover, sync::account_password,

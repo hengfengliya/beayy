@@ -790,6 +790,41 @@ for k, (typ, extra) in enumerate([("keyboard.text_input", {"app_name": "飞书",
     ev.append({"timestamp": iso(t), "event_type": typ, "device": MAC, **extra})
 mock["recent_events"] = {"events": ev, "more": True}
 
+# 收支：两个月的账单（微信、支付宝各一份，金额商户都是编的），格式同 get_bills，按月份存
+brnd = random.Random(7)
+SHOPS = [("街角咖啡", "餐饮美食", "拿铁", 2800, 3800), ("老街面馆", "餐饮美食", "牛肉面", 1800, 2600), ("云溪地铁", "交通出行", "地铁出行", 300, 600),
+         ("便利蜂", "日用百货", "饮料", 500, 1800), ("铁馆健身", "运动户外", "私教课", 28000, 28000), ("小区菜场", "餐饮美食", "买菜", 3000, 9000)]
+bills = []
+for k in range(70):
+    d = TODAY - timedelta(days=brnd.randint(0, 55))
+    who, cat, item, lo, hi = brnd.choice(SHOPS)
+    src = brnd.choice(["wechat", "alipay"])
+    bills.append({"src": src, "time": f"{d} {brnd.randint(8, 22):02d}:{brnd.randint(0, 59):02d}:00", "dir": "out", "fen": brnd.randint(lo, hi) // 10 * 10,
+                  "category": cat if src == "alipay" else "商户消费", "counterparty": who, "item": item, "method": "零钱" if src == "wechat" else "余额宝", "status": "支付成功" if src == "wechat" else "交易成功"})
+for m in {(TODAY - timedelta(days=n)).isoformat()[:7] for n in range(0, 56)}:
+    bills.append({"src": "alipay", "time": f"{m}-10 09:00:00", "dir": "in", "fen": 1250000, "category": "其他", "counterparty": "云溪科技", "item": "工资", "method": "", "status": "交易成功"})
+    bills.append({"src": "alipay", "time": f"{m}-05 10:00:00", "dir": "out", "fen": 320000, "category": "住房物业", "counterparty": "安居房屋", "item": "房租", "method": "余额宝", "status": "交易成功"})
+    bills.append({"src": "alipay", "time": f"{m}-12 21:00:00", "dir": "out", "fen": 59900, "category": "日用百货", "counterparty": "某网店", "item": "台灯", "method": "余额宝", "status": "交易关闭"})
+    bills.append({"src": "alipay", "time": f"{m}-15 03:00:00", "dir": "none", "fen": 200000, "category": "投资理财", "counterparty": "余额宝", "item": "单次转入", "method": "银行卡", "status": "交易成功"})
+bills.sort(key=lambda b: b["time"], reverse=True)
+by_month = {}
+for i, b in enumerate(bills):
+    m = b["time"][:7]
+    x = by_month.setdefault(m, {"month": m, "spend_fen": 0, "income_fen": 0, "refund_fen": 0, "count": 0, "days": {}, "to": {}, "items": []})
+    refund = b["fen"] if b["status"] == "交易关闭" else 0
+    counts = b["dir"] != "none"
+    out, inc = (b["fen"] - refund if b["dir"] == "out" else 0), (b["fen"] if b["dir"] == "in" else 0)
+    if counts:
+        x["count"] += 1; x["spend_fen"] += out; x["income_fen"] += inc; x["refund_fen"] += refund
+        dd = x["days"].setdefault(b["time"][:10], [0, 0]); dd[0] += out; dd[1] += inc
+        if out: t = x["to"].setdefault(b["counterparty"], [0, 0]); t[0] += out; t[1] += 1
+    x["items"].append({"id": f"{b['src']}:demo{i}", **b, "refund_fen": refund, "counted": counts, "is_refund": False, "note": ""})
+months_ = sorted(by_month, reverse=True)
+cover = {s: {"first": min(b["time"] for b in bills if b["src"] == s), "last": max(b["time"] for b in bills if b["src"] == s), "export": f"{TODAY} 10:40:00",
+             "count": sum(1 for b in bills if b["src"] == s)} for s in ("alipay", "wechat")}
+mock["get_bills"] = {m: {**x, "months": months_, "coverage": cover, "days": [{"date": d, "spend_fen": v[0], "income_fen": v[1]} for d, v in sorted(x["days"].items())],
+                         "to": [{"name": n, "spend_fen": v[0], "count": v[1]} for n, v in sorted(x["to"].items(), key=lambda kv: -kv[1][0])][:10]} for m, x in by_month.items()}
+
 for k, v in mock.items():
     (HERE / f"{k}.json").write_text(json.dumps(v, ensure_ascii=False), encoding="utf-8")
 (HERE / "mock.js").write_text("window.BEAYY_MOCK = " + json.dumps(mock, ensure_ascii=False) + ";\n", encoding="utf-8")

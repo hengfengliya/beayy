@@ -220,6 +220,19 @@ div.tl-row { grid-template-columns: 92px minmax(0, 1fr); }
 .usebar { height: 4px; margin-top: 6px; border-radius: 2px; background: var(--hover); overflow: hidden; max-width: 360px; }
 .usebar i { display: block; height: 100%; background: var(--ink-3); }
 .usebar i.hot { background: var(--warn); }
+/* 收支页：空状态的按钮和「怎么导出」一行；明细表的列宽；退了的、不计收支的金额变淡 */
+.empty-acts { display: flex; align-items: center; gap: var(--space-4); }
+.mx-table.bills .b-time { width: 104px; }
+.mx-table.bills .b-cat { width: 96px; }
+.mx-table.bills .b-src { width: 64px; }
+.mx-table.bills .b-amt { width: 136px; }
+.mx-table.bills-to th:not(:first-child) { width: 120px; }
+.mx-table .is-num small { margin-left: 6px; font-size: 12px; color: var(--ink-4); }
+.mx-table .bill-void { color: var(--ink-4); text-decoration: line-through; }
+.mx-table .bill-muted td { color: var(--ink-4); }
+.bills-more { margin-top: var(--space-4); }
+.bill-err { color: var(--risk-ink); }
+@media (max-width: 759px) { .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(5) { display: none; } }
 /* 设置「数据」页的表 */
 .mx-table.store th:last-child { width: 32%; }
 .mx-table.store .num { width: 15%; text-align: right; }

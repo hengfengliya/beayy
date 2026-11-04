@@ -22,6 +22,9 @@ beayy-remote.workspace = true
 regex = "1"
 sha2 = "0.10"
 ureq = { version = "3", default-features = false, features = ["json", "native-tls"] }
+# 收支：读微信的 xlsx 账单、支付宝的 GBK csv（bills.rs）
+calamine = { version = "0.38", default-features = false, features = ["chrono"] }
+encoding_rs = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
