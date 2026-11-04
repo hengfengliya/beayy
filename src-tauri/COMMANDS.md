@@ -45,6 +45,9 @@
 | `get_icons` | `{ "ids": [bundle id], "phone": bool }` | `{ id: { "icon": "data:image/png;base64,…" 或 null, "name": App Store 上的名字或 null } }`。电脑取本机图标；手机查 App Store（先中国区再美区），查不到的苹果自带 app 用 Mac 上对应的；缓存在 `Beayy/icons/` |
 | `open_permission`（kind 另可为 screentime：打开系统设置的屏幕使用时间页） | `{ "kind": "accessibility" \| "input_monitoring" \| "full_disk_access" }` | `null`（打开系统设置对应页） |
 | `open_data_dir` | — | `null` |
+| `pick_bill_files` | — | `["路径", …]`（选账单文件，可多选；macOS 用 osascript、Windows 用 PowerShell 的选文件窗口；取消是 `[]`） |
+| `import_bills` | `{ "paths": ["…"] }` | `{ files: [{ name, src, format: "微信"/"支付宝"/"支付宝网页版", export, rows, added, updated, skipped } 或 { name, error }], added, updated }`。存 `Beayy/bills/bills.json`；同一笔按交易号认，重复导入不重复记，导出晚的为准 |
+| `get_bills` | `{ "month": "YYYY-MM"? }`（不给＝有账单的最近一个月） | `{ month, months: [有账单的月份，新的在前], spend_fen（扣过退款）, income_fen, refund_fen, count, days: [{date, spend_fen, income_fen}], to: [{name, spend_fen, count}]（按对方，前 10）, items: [{ id, src, time（账单上的本地时刻）, dir: "out"/"in"/"none", fen, refund_fen, counted, is_refund, category, counterparty, item, method, status, note, order, kind, raw: {原表格列名: 值} }], coverage: { alipay/wechat: {first, last, export, count} }, imports: [{ file, src, format, export, imported_at, first, last, rows, added, updated, meta: [表头表尾的说明行] }]（Beayy/bills/imports.json，新的在前） }`。金额都是分。算法见 `src-tauri/src/bills.rs` 开头；手机核心没有这三个命令 |
 
 **实现状态（10-15）**：表里命令都已在 Rust 实现（`src-tauri/src/main.rs`、`src-tauri/src/data.rs`），和 `ui/mock/生成样例.py` 的输出逐项对过：31 天 `list_days`、10-15 的 `get_day` 完全相同。调试可以不开界面直接看结果：`app/target/release/beayy --dump list_days`、`--dump get_day 2026-10-15`、`--dump get_settings`、`--dump get_rules`。`settings.json` 里沿用 Python 摘要脚本的键名（summary_model、daily_model、blacklist），由 Rust 换成上表的叫法。
 

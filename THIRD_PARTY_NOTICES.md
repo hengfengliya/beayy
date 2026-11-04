@@ -31,6 +31,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Personal-Bill（zhu123279/Personal-Bill）
+
+- 用到：收支导入（`src-tauri/src/bills.rs`）参考了它认微信、支付宝账单表头和判断重复、退款的思路，没有拷代码。
+- 许可证：MIT。
+
 ## Lucide（lucide-icons/lucide）
 
 - 用到：网页界面（`ui/index.html`、`ui/app.js`）里的图标路径：panel-left、arrow-left、arrow-right、clock、file-text、list-checks、monitor-smartphone、chevron-down、settings、pause、play、folder、info、log-out、monitor、smartphone。

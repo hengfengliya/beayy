@@ -818,11 +818,22 @@ for i, b in enumerate(bills):
         x["count"] += 1; x["spend_fen"] += out; x["income_fen"] += inc; x["refund_fen"] += refund
         dd = x["days"].setdefault(b["time"][:10], [0, 0]); dd[0] += out; dd[1] += inc
         if out: t = x["to"].setdefault(b["counterparty"], [0, 0]); t[0] += out; t[1] += 1
-    x["items"].append({"id": f"{b['src']}:demo{i}", **b, "refund_fen": refund, "counted": counts, "is_refund": False, "note": ""})
+    yuan_ = f"{b['fen'] / 100:.2f}"
+    raw = ({"交易时间": b["time"], "交易类型": b["category"], "交易对方": b["counterparty"], "商品": b["item"], "收/支": {"out": "支出", "in": "收入"}.get(b["dir"], "/"),
+            "金额(元)": "¥" + yuan_, "支付方式": b["method"], "当前状态": b["status"], "交易单号": f"4200000{i:023d}"} if b["src"] == "wechat" else
+           {"交易时间": b["time"], "交易分类": b["category"], "交易对方": b["counterparty"], "商品说明": b["item"], "收/支": {"out": "支出", "in": "收入"}.get(b["dir"], "不计收支"),
+            "金额": yuan_, "收/付款方式": b["method"], "交易状态": b["status"], "交易订单号": f"2026{i:024d}"})
+    x["items"].append({"id": f"{b['src']}:demo{i}", **b, "refund_fen": refund, "counted": counts, "is_refund": False, "note": "", "order": "", "kind": "", "raw": raw})
 months_ = sorted(by_month, reverse=True)
 cover = {s: {"first": min(b["time"] for b in bills if b["src"] == s), "last": max(b["time"] for b in bills if b["src"] == s), "export": f"{TODAY} 10:40:00",
              "count": sum(1 for b in bills if b["src"] == s)} for s in ("alipay", "wechat")}
-mock["get_bills"] = {m: {**x, "months": months_, "coverage": cover, "days": [{"date": d, "spend_fen": v[0], "income_fen": v[1]} for d, v in sorted(x["days"].items())],
+imports_ = [{"file": f"微信支付账单流水文件({FIRST:%Y%m%d}-{TODAY:%Y%m%d})_{TODAY:%Y%m%d}104521.xlsx", "src": "wechat", "format": "微信", "export": f"{TODAY} 10:45:21", "imported_at": f"{TODAY} 10:50:02",
+             "first": cover["wechat"]["first"], "last": cover["wechat"]["last"], "rows": cover["wechat"]["count"], "added": cover["wechat"]["count"], "updated": 0,
+             "meta": ["微信昵称：[小舟]", f"起始时间：[{FIRST} 00:00:00] 终止时间：[{TODAY} 10:45:21]", "导出类型：[全部]", f"导出时间：[{TODAY} 10:45:21]", f"共{cover['wechat']['count']}笔记录"]},
+            {"file": f"支付宝交易明细({FIRST:%Y%m%d}-{TODAY:%Y%m%d}).csv", "src": "alipay", "format": "支付宝", "export": f"{TODAY} 10:40:00", "imported_at": f"{TODAY} 10:50:02",
+             "first": cover["alipay"]["first"], "last": cover["alipay"]["last"], "rows": cover["alipay"]["count"], "added": cover["alipay"]["count"], "updated": 0,
+             "meta": ["姓名：小舟", f"起始时间：[{FIRST} 00:00:00] 终止时间：[{TODAY} 23:59:59]", "导出交易类型：[全部]", f"导出时间：[{TODAY} 10:40:00]", f"共{cover['alipay']['count']}笔记录"]}]
+mock["get_bills"] = {m: {**x, "months": months_, "coverage": cover, "imports": imports_, "days": [{"date": d, "spend_fen": v[0], "income_fen": v[1]} for d, v in sorted(x["days"].items())],
                          "to": [{"name": n, "spend_fen": v[0], "count": v[1]} for n, v in sorted(x["to"].items(), key=lambda kv: -kv[1][0])][:10]} for m, x in by_month.items()}
 
 for k, v in mock.items():

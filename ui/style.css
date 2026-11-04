@@ -220,19 +220,43 @@ div.tl-row { grid-template-columns: 92px minmax(0, 1fr); }
 .usebar { height: 4px; margin-top: 6px; border-radius: 2px; background: var(--hover); overflow: hidden; max-width: 360px; }
 .usebar i { display: block; height: 100%; background: var(--ink-3); }
 .usebar i.hot { background: var(--warn); }
-/* 收支页：空状态的按钮和「怎么导出」一行；明细表的列宽；退了的、不计收支的金额变淡 */
+/* 收支页：空状态的按钮和「怎么导出」一行；工具栏照 Claude 的（页签｜分段 … 翻月、搜索、筛选、排序、主按钮）；明细表列宽；退了的划掉、不计收支的变淡 */
 .empty-acts { display: flex; align-items: center; gap: var(--space-4); }
+.bill-toolbar .toolbar-right { gap: var(--space-1); }
+.bill-search { width: 176px; }
+.bill-month { gap: 4px; padding: 0 8px 0 12px; font-variant-numeric: tabular-nums; }
+.bill-month .mx-ico { width: 14px; height: 14px; color: var(--ink-3); }
+.bill-add .mx-btn { gap: 6px; padding-right: 10px; }
+.bill-add .mx-btn .mx-ico { width: 14px; height: 14px; }
+.bill-chips { margin: calc(-1 * var(--space-3)) 0 var(--space-5); }
+.bill-chips[hidden] { display: none; }
+.mx-table.bills tbody tr, .mx-table.bills-to tbody tr, .mx-table.bill-imports tbody tr { cursor: pointer; }
 .mx-table.bills .b-time { width: 104px; }
 .mx-table.bills .b-cat { width: 96px; }
+.mx-table.bills .b-method { width: 128px; }
 .mx-table.bills .b-src { width: 64px; }
 .mx-table.bills .b-amt { width: 136px; }
-.mx-table.bills-to th:not(:first-child) { width: 120px; }
+.mx-table.bills-to th:not(:first-child) { width: 104px; }
+.mx-table.bill-imports .b-fmt { width: 112px; }
+.mx-table.bill-imports .b-range { width: 184px; }
+.mx-table.bill-imports .b-n { width: 72px; }
+.mx-table.bill-imports .b-at { width: 136px; }
 .mx-table .is-num small { margin-left: 6px; font-size: 12px; color: var(--ink-4); }
 .mx-table .bill-void { color: var(--ink-4); text-decoration: line-through; }
 .mx-table .bill-muted td { color: var(--ink-4); }
 .bills-more { margin-top: var(--space-4); }
 .bill-err { color: var(--risk-ink); }
-@media (max-width: 759px) { .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(5) { display: none; } }
+.bill-cover { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 一笔的详情、一份账单的详情（弹层） */
+.bill-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bill-facts dd { overflow-wrap: anywhere; }
+.bill-raw-h { margin: var(--space-5) 0 var(--space-2); padding: 0; }
+.bill-raw { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--space-4); margin: 0; font-size: 13px; }
+.bill-raw dt { color: var(--ink-4); }
+.bill-raw dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.bill-meta { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); user-select: text; }
+@media (max-width: 1099px) { .mx-table.bills .b-method, .mx-table.bills td:nth-child(5) { display: none; } }
+@media (max-width: 759px) { .mx-table.bills-to th:not(:first-child) { width: 64px; } .mx-table.bills .b-time { width: 88px; } .mx-table.bills .b-amt { width: 96px; } .mx-table.bills th:nth-child(3), .mx-table.bills td:nth-child(3), .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(6) { display: none; } .mx-table.bill-imports .b-range, .mx-table.bill-imports td:nth-child(3), .mx-table.bill-imports .b-at, .mx-table.bill-imports td:nth-child(5) { display: none; } }
 /* 设置「数据」页的表 */
 .mx-table.store th:last-child { width: 32%; }
 .mx-table.store .num { width: 15%; text-align: right; }
