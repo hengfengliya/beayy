@@ -670,7 +670,7 @@ fn day_input(date: NaiveDate) -> Result<DayInput, String> {
         .collect();
     // 当前这个小时还没有小时摘要：补上最近的 10 分钟摘要
     let recent: Vec<String> = day["segments"].as_array().cloned().unwrap_or_default().iter().rev()
-        .filter(|s| s["kind"] == "10min" && s["source"] == "beayy").take(6)
+        .filter(|s| s["kind"] != "6h" && s["source"] == "beayy").take(6)
         .map(|s| format!("{} {}：{}", s["start"].as_str().and_then(|x| DateTime::parse_from_rfc3339(x).ok()).map(|t| t.with_timezone(&Local).format("%H:%M").to_string()).unwrap_or_default(), s["title"].as_str().unwrap_or(""), s["description"].as_str().unwrap_or("")))
         .collect();
 

@@ -2989,12 +2989,17 @@ function loginDialog(mode = "login", email = "") {
   };
   const links = { login: [["signup", tr("没有账号？注册")], ["recover", tr("忘了主密码")]], signup: [["login", tr("已经有账号？登录")]], recover: [["login", tr("想起来了？登录")]] }[mode];
   const [title, body, ok, busy] = forms[mode];
+  // 登到哪台服务器：手机和电脑要选同一台，不然同一个邮箱在另一台上登不进去
+  const cf = S.settings || {};
+  const server = cf.sync_server ? `<p class="note">${tr("服务器 {host}", { host: `<span class="mono">${esc(hostOf(cf.sync_server))}</span>` })}${sy.configured ? "" : ` <button class="mx-btn mx-btn--text mx-btn--sm" data-server>${tr("更改")}</button>`}</p>` : "";
   openDialog({
     title, ok, busy,
     body: (mode === "recover" ? `<p class="note">${tr("重设后，其他设备要重新登录")}</p>` : `<p class="note">${tr("记录在本机加密后再同步，服务器读不到内容")}</p>`) + body
-      + `<div class="dlg-links">${links.map(([k, v]) => `<button class="mx-btn mx-btn--text mx-btn--sm" data-to="${k}">${v}</button>`).join("")}</div>`,
+      + server + `<div class="dlg-links">${links.map(([k, v]) => `<button class="mx-btn mx-btn--text mx-btn--sm" data-to="${k}">${v}</button>`).join("")}</div>`,
     onOpen: (el) => {
       el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => loginDialog(b.dataset.to, dlgVal(el, "em"))));
+      const sv = el.querySelector("[data-server]");
+      if (sv) sv.onclick = () => { const em = dlgVal(el, "em"); syncServerDialog(() => loginDialog(mode, em)); };
       // 注册：问服务器要不要邀请码；开放注册的写明每个账号能存多少，满了怎么办
       if (mode === "signup") call("signup_info").then((i) => {
         const box = el.querySelector("#inv-box"), note = el.querySelector("#inv-note");
@@ -3204,6 +3209,7 @@ async function renderSettings() {
         + setRow(tr("主题"), "", `<div class="mx-seg" role="tablist" id="theme">${THEMES.map(([k, v]) => `<button role="tab" aria-selected="${k === theme}" class="${k === theme ? "is-on" : ""}" data-theme="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("语言"), "", `<div class="mx-seg" role="tablist" id="lang">${LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === langPref}" class="${k === langPref ? "is-on" : ""}" data-lang="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("AI 总结的语言"), tr("10 分钟摘要、日总结、周总结、月总结用哪种语言写"), `<div class="mx-seg" role="tablist" id="sum-lang">${SUM_LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.summary_language || "")}" class="${k === (cf.summary_language || "") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
+        + (mobile ? "" : setRow(tr("摘要间隔"), tr("越长越省 token，细节越少"), `<div class="mx-seg" role="tablist" id="sum-every">${[10, 20, 30, 60].map((k) => `<button role="tab" aria-selected="${k === (cf.summary_minutes || 10)}" class="${k === (cf.summary_minutes || 10) ? "is-on" : ""}" data-v="${k}">${tr("{n} 分钟", { n: k })}</button>`).join("")}</div>`))
         + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), `<div class="mx-seg" role="tablist" id="roast">${ROASTS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.roast || "off")}" class="${k === (cf.roast || "off") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
         + (mobile ? "" : setRow(tr("字体"), fontDesc(), smallBtn("font-edit", tr("更改")))))
       + (mobile ? section(tr("关于"), setRow(tr("版本 {v}", { v: esc(st.version || "") }), tr("手机版跟着 TestFlight 更新"), "")) : aboutSection());
@@ -3246,9 +3252,9 @@ async function renderSettings() {
       + (st.mobile ? "" : setRow(tr("模型用量"), tr("近 30 天，按用途分"), smallBtn("c-usage", tr("查看"))))
       + setRow(tr("转写服务"), `${asrOfficial ? tr("官方") : `${tr("自建")} · <span class="mono">${esc(hostOf(cf.transcribe_server))}</span>`} · ${tr("你叫「{name}」", { name: esc(cf.speaker_name) })}${st.cloud_sync ? `<br>${esc(st.cloud_sync)}` : ""}`, smallBtn("c-asr", tr("设置")))
       + setRow(tr("地图"), osm ? tr("OpenStreetMap · 免费，不用 Key") : `${tr("高德地图")} · ${mapOfficial ? tr("官方") : `${tr("自己的 Key")} · ${amap}`}`, smallBtn("c-amap", tr("设置")))
-      + (st.mobile ? "" : setRow(tr("同步方式"), cf.sync_mode === "folder" ? `${tr("同步文件夹")} · <span class="mono">${esc(tildePath(cf.sync_folder))}</span>`
+      + setRow(tr("同步方式"), cf.sync_mode === "folder" && !st.mobile ? `${tr("同步文件夹")} · <span class="mono">${esc(tildePath(cf.sync_folder))}</span>`
           : `<span class="mono">${esc(hostOf(cf.sync_server))}</span>${cf.sync_server === cf.default_sync_server ? ` · ${tr("官方服务器")}` : ` · ${tr("自建服务器")}`}`,
-        smallBtn("c-sync", tr("更改"), syncLocked ? `disabled title="${tr("同步开着不能换，先在「账号」里退出")}"` : "")))
+        smallBtn("c-sync", tr("更改"), syncLocked ? `disabled title="${tr("同步开着不能换，先在「账号」里退出")}"` : ""))
       )
       + (st.mobile ? "" : section(tr("问问历史"), setRow(tr("接到 AI 里"), tr("让 Claude、Cursor 这类本机 AI 读你的记录，直接问「上周哪天熬夜最多」「X 推进到哪了」，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
   } else if (tab === "data") {
@@ -3285,6 +3291,11 @@ async function renderSettings() {
     document.getElementById("roast").onclick = async (e) => {
       const b = e.target.closest("[data-v]"); if (!b) return;
       await saveSome({ roast: b.dataset.v }); renderSettings();
+    };
+    const every = document.getElementById("sum-every");
+    if (every) every.onclick = async (e) => {
+      const b = e.target.closest("[data-v]"); if (!b) return;
+      await saveSome({ summary_minutes: +b.dataset.v }); renderSettings();
     };
     document.getElementById("sum-lang").onclick = async (e) => {
       const b = e.target.closest("[data-v]"); if (!b) return;
@@ -3503,11 +3514,12 @@ function amapDialog() {
   });
 }
 
-/** 同步方式：官方服务器（默认）、自建服务器（app/server 部署的）、同步文件夹（iCloud 云盘、网盘、NAS，不经服务器）。只能在没开同步时换 */
-function syncServerDialog() {
-  const cf = S.settings;
-  let mode = cf.sync_mode === "folder" ? "folder" : cf.sync_server === cf.default_sync_server ? "official" : "custom";
-  const seg = [["official", tr("官方服务器")], ["custom", tr("自建服务器")], ["folder", tr("同步文件夹")]];
+/** 同步方式：官方服务器（默认）、自建服务器（app/server 部署的）、同步文件夹（iCloud 云盘、网盘、NAS，不经服务器；手机没有）。
+ * 只能在没开同步时换。after＝存好以后接着做的（从登录框点进来的回到登录框） */
+function syncServerDialog(after) {
+  const cf = S.settings, mobile = !!(S.status || {}).mobile;
+  let mode = cf.sync_mode === "folder" && !mobile ? "folder" : cf.sync_server === cf.default_sync_server ? "official" : "custom";
+  const seg = [["official", tr("官方服务器")], ["custom", tr("自建服务器")], ["folder", tr("同步文件夹")]].filter(([k]) => !mobile || k !== "folder");
   openDialog({
     title: tr("同步方式"), ok: tr("保存"),
     body: `<div class="mx-field"><div class="mx-seg" role="tablist" id="sm-mode">${seg.map(([k, v]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div></div>
@@ -3540,6 +3552,7 @@ function syncServerDialog() {
         await saveSome({ sync_mode: "server", sync_server: v });
       }
       AC.folder = null; renderSettings();
+      if (typeof after === "function") setTimeout(after);
     },
   });
 }

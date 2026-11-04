@@ -355,7 +355,9 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
         let Ok(start) = chrono::NaiveDateTime::parse_from_str(&name[..19], "%Y-%m-%dT%H-%M-%S") else { continue };
         let start = Utc.from_utc_datetime(&start);
         let six = name.contains("-6h-");
-        let end = start + if six { Duration::hours(6) } else { Duration::minutes(10) };
+        // 一份管多长看文件名（摘要间隔调长后是 -30min-、-60min-）
+        let mins = if six { 360 } else { beayy_summary::summary_minutes(&name).unwrap_or(10) };
+        let end = start + Duration::minutes(mins);
         let st = stamp(&f);
         if let Some((m, n, date, seg)) = cache.get(&f) {
             if st == Some((*m, *n)) {
@@ -377,7 +379,7 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
         let seg = json!({
             "active_sec": fm.get("active_sec").cloned().unwrap_or(Value::Null),
             "parts": fm.get("parts").cloned().unwrap_or(Value::Null),
-            "start": utc_iso(start), "end": utc_iso(end), "kind": if six { "6h" } else { "10min" }, "source": "beayy", "device": device,
+            "start": utc_iso(start), "end": utc_iso(end), "kind": if six { "6h".to_string() } else { format!("{mins}min") }, "source": "beayy", "device": device,
             "title": front.get("title").cloned().unwrap_or_default(),
             "apps": front.get("applications").map(|a| a.trim_matches(|c| c == '[' || c == ']').split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect::<Vec<_>>()).unwrap_or_default(),
             "description": front.get("description").cloned().unwrap_or_default(),
@@ -1498,6 +1500,8 @@ pub fn get_settings() -> Value {
         "map_provider": crate::amap::provider(),
         // AI 总结的语言：zh／en，空＝跟随界面语言（ui_lang 是界面启动时报的）
         "summary_language": get("summary_language", ""),
+        // 摘要间隔（分钟）：10／20／30／60，越长越省 token
+        "summary_minutes": beayy_summary::Summarizer::new(default_root()).every(),
         "ui_lang": get("ui_lang", ""),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
@@ -1511,7 +1515,7 @@ pub fn get_settings() -> Value {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes")];
     for (from, to) in map {
         if let Some(mut v) = settings.get(from).cloned() {
             // 同步服务器、转写服务填的就是官方的，存成空（官方地址以后变了跟着变）
@@ -1586,12 +1590,11 @@ pub fn delete_since(minutes: Option<i64>, today: Option<bool>) -> Result<usize, 
             }
         }
     }
-    if let Ok(files) = fs::read_dir(default_root().join("summaries")) {
-        for f in files.filter_map(|e| e.ok()) {
-            let n = f.file_name().to_string_lossy().to_string();
-            if touched.iter().any(|t| n.starts_with(t.trim_end_matches('Z'))) {
-                let _ = fs::remove_file(f.path());
-            }
+    // 删掉管到这些分段的摘要（间隔调长后一份管几段，从更早的分段起）
+    let sm = beayy_summary::Summarizer::new(default_root());
+    for t in &touched {
+        for f in sm.existing(t) {
+            let _ = fs::remove_file(f);
         }
     }
     Ok(removed)

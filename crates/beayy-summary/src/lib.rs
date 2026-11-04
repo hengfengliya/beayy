@@ -3,6 +3,8 @@
 //!
 //! 输入：`<数据根>/devices/mac-*/segments/<UTC 整 10 分>/events.jsonl`（格式见 app/README.md；多台 Mac 同段合并）
 //! 输出：`<数据根>/summaries/YYYY-MM-DDTHH-MM-SS-xxxx-10min-memory-summary.md`（UTC）
+//! 摘要间隔（settings.json 的 summary_minutes：10／20／30／60，默认 10）调长后，一份摘要管几个分段，
+//! 文件名里写它管多长（-30min-），读的一方按文件名算止时刻；采集的分段照旧是 10 分钟。
 //!
 //! 每个已结束、还没写过摘要的分段：
 //!   1. 代码算时长表：切换区间 ∩ 在电脑前，心跳兜底（同 脚本/beayy时长.py）；早期没有 presence 的分段只按切换算；
@@ -15,7 +17,7 @@
 //! 设置：`<数据根>/settings.json` 的 gateway（任何 OpenAI 兼容接口）、summary_model，没填用 beayy_core::DEFAULT_GATEWAY／DEFAULT_MODEL（模型也空就不写摘要）。
 //! 密钥：环境变量 BEAYY_API_KEY（或旧名 LIFE_RECORD_API_KEY）＞ 钥匙串（服务 com.fengli.beayy，账户 api_key）。
 
-use chrono::{DateTime, Duration, Local, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDateTime, Timelike, Utc};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -36,7 +38,8 @@ const SPEECH_MERGE: i64 = 20;
 const SPEECH_WAIT_MIN: i64 = 40;
 /// 整段都不在电脑前的固定标题：不调模型，直接写；界面把连续的这种段合成一行
 pub const IDLE_TITLE: &str = "不在电脑前";
-const IDLE_TEXT: &str = "这 10 分钟没有键鼠操作（离开、锁屏或睡眠）。";
+/// 摘要间隔能选的（分钟）：都能整除 60，一份摘要不会跨小时
+pub const EVERY: &[i64] = &[10, 20, 30, 60];
 const NOISE: &[&str] = &["app.launch", "permission.changed", "permission.requested", "tap.started", "app.quit", "app.paused", "app.resumed", "relay.sync", "relay.error"];
 // 时长（同 脚本/beayy时长.py）
 const IDLE_THRESHOLD: i64 = 180;
@@ -109,6 +112,20 @@ pub struct Summarizer {
 
 fn seg_start(name: &str) -> DateTime<Utc> {
     NaiveDateTime::parse_from_str(name, "%Y-%m-%dT%H-%M-%SZ").map(|t| t.and_utc()).unwrap_or_default()
+}
+
+fn seg_name(t: DateTime<Utc>) -> String {
+    t.format("%Y-%m-%dT%H-%M-00Z").to_string()
+}
+
+fn idle_text(mins: i64) -> String {
+    format!("这 {mins} 分钟没有键鼠操作（离开、锁屏或睡眠）。")
+}
+
+/// 摘要文件管多长（分钟）：文件名里的 -10min-、-30min-；不是分段摘要的给 None
+pub fn summary_minutes(file: &str) -> Option<i64> {
+    let k = file.strip_suffix("-memory-summary.md")?.rsplit('-').next()?;
+    k.strip_suffix("min")?.parse().ok().filter(|m| *m > 0)
 }
 
 fn hms(t: DateTime<Utc>) -> String {
@@ -384,9 +401,9 @@ impl Summarizer {
 
     /// 各 app 前台秒数。有 presence/heartbeat 的分段：切换区间 ∩ 在电脑前，心跳兜底；
     /// 早期分段没有这两类事件，退回只按 app.activated 区间算（开头沿用往前最近一次切换，不扣空闲）。
-    fn durations(&self, name: &str, events: &[Ev], names: &[String]) -> (Vec<(String, f64)>, HashMap<String, String>, &'static str) {
+    fn durations(&self, name: &str, events: &[Ev], names: &[String], mins: i64) -> (Vec<(String, f64)>, HashMap<String, String>, &'static str) {
         let start = seg_start(name);
-        let end = start + Duration::minutes(10);
+        let end = start + Duration::minutes(mins);
         let mut bundles: HashMap<String, String> = HashMap::new();
         for e in events {
             if !s(e, "app_name").is_empty() && !s(e, "bundle_id").is_empty() {
@@ -406,8 +423,9 @@ impl Summarizer {
                 }
             }
             let here: f64 = sec.iter().map(|x| x.1).sum();
-            if here < 595.0 {
-                sec.push(("（不在电脑前或没在采）".into(), 600.0 - here));
+            let all = (mins * 60) as f64;
+            if here < all - 5.0 {
+                sec.push(("（不在电脑前或没在采）".into(), all - here));
             }
             sec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             return (sec, bundles, "按切换与在电脑前区间求交，心跳兜底");
@@ -448,10 +466,10 @@ impl Summarizer {
 
     // ---------- 3. 拼包 ----------
 
-    /// 拼好的包、时长表、applications
-    pub fn build_pack(&self, name: &str, events: &[Ev], names: &[String]) -> (String, Vec<String>, i64) {
+    /// 拼好的包、时长表、applications。mins＝这份摘要管多长（从 name 这个分段起），events 是这段时间本机的事件
+    pub fn build_pack(&self, name: &str, events: &[Ev], names: &[String], mins: i64) -> (String, Vec<String>, i64) {
         let start = seg_start(name);
-        let (rows, bundles, how) = self.durations(name, events, names);
+        let (rows, bundles, how) = self.durations(name, events, names, mins);
         let mut dd = Dedup::default();
         if let Some(prev) = names.iter().filter(|n| n.as_str() < name).last() {
             for e in self.load_own(prev) {
@@ -558,7 +576,7 @@ impl Summarizer {
         }
         items.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let end = start + Duration::minutes(10);
+        let end = start + Duration::minutes(mins);
         let mut head = vec![
             format!(
                 "时段：{}–{}（北京时间）",
@@ -589,20 +607,22 @@ impl Summarizer {
                 })
                 .collect()
         };
-        let tail = self.speech_and_place(start, start + Duration::minutes(10));
+        let tail = self.speech_and_place(start, end);
+        // 间隔调长后包的上限按时长的平方根放宽：1 小时约 2.4 万字（6 份 10 分钟的上限是 6 万），省 token，又不至于丢掉中间一大段
+        let budget = (PACK_CHARS as f64 * (mins as f64 / 10.0).sqrt()) as usize;
         let join = |parts: Vec<Vec<String>>| head.iter().cloned().chain(parts.into_iter().flatten()).chain(tail.iter().cloned()).collect::<Vec<_>>().join("\n");
         let (mut ui_cap, mut cap) = (2000, 2000);
         let mut pack = String::new();
         for (u, c) in [(2000, 2000), (1000, 2000), (500, 600), (250, 300), (120, 300)] {
             (ui_cap, cap) = (u, c);
             pack = join(vec![lines(&items, u, c)]);
-            if clen(&pack) <= PACK_CHARS {
+            if clen(&pack) <= budget {
                 break;
             }
         }
         // 从正中间往两边一次丢 10 条，直到放得下（同原来：至少留 20 条）
         let mut drop = 0;
-        while clen(&pack) > PACK_CHARS && items.len() - drop > 20 {
+        while clen(&pack) > budget && items.len() - drop > 20 {
             drop = (drop + 10).min(items.len());
             let a = (items.len() - drop) / 2;
             pack = join(vec![lines(&items[..a], ui_cap, cap), vec!["……（中间略）".into()], lines(&items[a + drop..], ui_cap, cap)]);
@@ -759,7 +779,7 @@ impl Summarizer {
         self.raw_settings().get("model_mode").and_then(Value::as_str) == Some("official")
     }
 
-    fn call_model(&self, pack: &str, prior: &str, known: &[String]) -> Result<(Map<String, Value>, Value), String> {
+    fn call_model(&self, pack: &str, prior: &str, known: &[String], mins: i64) -> Result<(Map<String, Value>, Value), String> {
         let mut user = String::new();
         if !known.is_empty() {
             user += &format!("已有的项目名（同一件事请沿用这里的写法）：{}\n\n", known.join("、"));
@@ -768,7 +788,7 @@ impl Summarizer {
             user += &format!("上一段摘要：{prior}\n\n");
         }
         user += pack;
-        self.chat("segment", &format!("{PROMPT}{ACTIVITY_GUIDE}"), &user)
+        self.chat("segment", &format!("{}{ACTIVITY_GUIDE}", PROMPT.replace("10 分钟", &format!("{mins} 分钟"))), &user)
     }
 
     /// 给别处用：问一次模型，要一个 JSON 对象回来
@@ -882,16 +902,22 @@ impl Summarizer {
 
     // ---------- 5. 写 Markdown ----------
 
-    fn existing(&self, name: &str) -> Vec<PathBuf> {
-        let stamp = name.strip_suffix('Z').unwrap_or(name);
-        let prefix = format!("{stamp}-");
+    /// 管到这个分段的摘要文件：从它起的，或从同一小时更早的分段起、管得够长的（间隔调长后一份管几个分段）
+    pub fn existing(&self, name: &str) -> Vec<PathBuf> {
+        let t = seg_start(name);
         read_dir_sorted(&self.out_dir())
             .into_iter()
             .filter(|p| {
                 let f = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
-                f.starts_with(&prefix) && f.ends_with("-10min-memory-summary.md")
+                let Some(mins) = summary_minutes(&f) else { return false };
+                (0..6).any(|j| mins > 10 * j && f.starts_with(&format!("{}-", seg_name(t - Duration::minutes(10 * j)).trim_end_matches('Z'))))
             })
             .collect()
+    }
+
+    /// 摘要间隔（分钟）：settings.json 的 summary_minutes，只认 EVERY 里的，默认 10
+    pub fn every(&self) -> i64 {
+        self.raw_settings().get("summary_minutes").and_then(Value::as_i64).filter(|m| EVERY.contains(m)).unwrap_or(10)
     }
 
     fn prior_summary(&self, name: &str, names: &[String]) -> String {
@@ -906,7 +932,7 @@ impl Summarizer {
         String::new()
     }
 
-    fn render(&self, name: &str, j: &Map<String, Value>, apps: &[String], active: i64) -> String {
+    fn render(&self, segs: &[String], j: &Map<String, Value>, apps: &[String], active: i64) -> String {
         let one = |v: Option<&Value>| -> String {
             let x = match v {
                 Some(Value::String(s)) => s.clone(),
@@ -957,35 +983,37 @@ impl Summarizer {
         }
         md.push("## Citations".into());
         md.push(String::new());
-        md.extend(self.seg_files(name).iter().map(|p| format!("- {}", p.display())));
+        md.extend(segs.iter().flat_map(|n| self.seg_files(n)).map(|p| format!("- {}", p.display())));
         md.push(String::new());
         md.join("\n")
     }
 
-    /// 写一份「不在电脑前」的固定摘要（不调模型），换掉这一段已有的
-    fn write_idle(&self, name: &str) -> bool {
+    /// 写一份「不在电脑前」的固定摘要（不调模型），换掉这几段已有的
+    fn write_idle(&self, segs: &[String], mins: i64) -> bool {
+        let text = idle_text(mins);
         let j: Map<String, Value> = serde_json::from_value(json!({
-            "title": IDLE_TITLE, "description": IDLE_TEXT, "memory_summary": IDLE_TEXT,
+            "title": IDLE_TITLE, "description": text, "memory_summary": text,
             "prior_context": "", "context": [], "recording": []
         }))
         .unwrap();
-        for p in self.existing(name) {
+        for p in segs.iter().flat_map(|n| self.existing(n)) {
             let _ = fs::remove_file(p);
         }
-        let out = self.out_dir().join(format!("{}-{}-10min-memory-summary.md", name.trim_end_matches('Z'), suffix()));
-        fs::write(&out, self.render(name, &j, &[], 0)).is_ok()
+        let out = self.out_dir().join(format!("{}-{}-{mins}min-memory-summary.md", segs[0].trim_end_matches('Z'), suffix()));
+        fs::write(&out, self.render(segs, &j, &[], 0)).is_ok()
     }
 
     /// 把已经写过、但整段不在电脑前的分段换成固定摘要（以前每段都调了模型）。返回换掉的段数
     pub fn redo_idle(&self) -> usize {
         let mut n = 0;
         for name in self.segment_names() {
-            let old = self.existing(&name);
+            // 只换正好管这 10 分钟的；管几段的那种（间隔调长后写的）里别的段可能有活动
+            let old: Vec<PathBuf> = self.existing(&name).into_iter().filter(|p| p.file_name().map(|f| f.to_string_lossy().starts_with(name.trim_end_matches('Z')) && summary_minutes(&f.to_string_lossy()) == Some(10)).unwrap_or(false)).collect();
             if old.is_empty() {
                 continue;
             }
             let already = old.iter().any(|p| fs::read_to_string(p).map(|t| t.contains(&format!("title: {IDLE_TITLE}\n"))).unwrap_or(false));
-            if !already && is_idle(&self.load(&name)) && self.write_idle(&name) {
+            if !already && is_idle(&self.load(&name)) && self.write_idle(std::slice::from_ref(&name), 10) {
                 n += 1;
             }
         }
@@ -996,19 +1024,21 @@ impl Summarizer {
     pub fn dry_run(&self, name: &str) -> String {
         let names = self.segment_names();
         let events = self.load(name);
-        self.build_pack(name, &events, &names).0
+        self.build_pack(name, &events, &names, 10).0
     }
 
     /// 用现在的提示词给某个分段问一次模型，返回（模型给的 JSON，用量），不写文件（调试用：改提示词后和已有摘要对比）
     pub fn try_segment(&self, name: &str) -> Result<(Map<String, Value>, Value), String> {
         let names = self.segment_names();
         let events = self.load_own(name);
-        let (pack, _, _) = self.build_pack(name, &events, &names);
-        self.call_model(&pack, &self.prior_summary(name, &names), &self.known_projects())
+        let (pack, _, _) = self.build_pack(name, &events, &names, 10);
+        self.call_model(&pack, &self.prior_summary(name, &names), &self.known_projects(), 10)
     }
 
-    /// 写摘要。`pick` 为空＝本机记过、已结束、还没写过的分段（同步来的别的电脑的分段由那台自己写，免得重复调模型）；
-    /// 指定分段名时已写过的也重写。每段一行日志交给 `log`。
+    /// 写摘要。`pick` 为空＝本机记过、已结束、还没写过的分段（同步来的别的电脑的分段由那台自己写，免得重复调模型），
+    /// 按摘要间隔并成一份：同一个间隔（如 14:00–14:30）里的分段等间隔结束后一起写，问一次模型；
+    /// 间隔中途改过、前面几段已经有摘要的，从第一段没写的写到间隔结束。
+    /// 指定分段名时已写过的也重写（每段单独写 10 分钟的）。每份一行日志交给 `log`。
     pub fn run(&self, pick: &[String], mut log: impl FnMut(String)) -> usize {
         if pick.is_empty() {
             if let Some(left) = self.backoff_wait() {
@@ -1019,41 +1049,57 @@ impl Summarizer {
         let names = self.segment_names();
         let now = Utc::now();
         let mine = self.devices().join(beayy_core::local_device()).join("segments");
-        let todo: Vec<String> = if pick.is_empty() {
-            names
-                .iter()
-                .filter(|n| seg_start(n) + Duration::minutes(10) <= now && self.existing(n).is_empty() && mine.join(n.as_str()).join("events.jsonl").is_file())
-                .filter(|n| !self.speech_pending(seg_start(n) + Duration::minutes(10), now))
-                .cloned()
-                .collect()
+        // 每份：（这几个分段, 止时刻）
+        let mut todo: Vec<(Vec<String>, DateTime<Utc>)> = vec![];
+        if pick.is_empty() {
+            let every = self.every();
+            for n in names.iter().filter(|n| self.existing(n).is_empty() && mine.join(n.as_str()).join("events.jsonl").is_file()) {
+                let t = seg_start(n);
+                let end = t - Duration::minutes(t.minute() as i64 % every) + Duration::minutes(every);
+                match todo.last_mut() {
+                    Some((segs, e)) if *e == end => segs.push(n.clone()),
+                    _ => todo.push((vec![n.clone()], end)),
+                }
+            }
+            for (segs, end) in todo.iter_mut() {
+                // 间隔里后面有已经写过的段（改间隔前写的）：只写到它前面
+                if let Some(c) = names.iter().find(|x| x.as_str() > segs[0].as_str() && seg_start(x) < *end && !self.existing(x).is_empty()) {
+                    *end = seg_start(c);
+                    segs.retain(|x| seg_start(x) < *end);
+                }
+            }
+            todo.retain(|(_, end)| *end <= now && !self.speech_pending(*end, now));
         } else {
-            pick.to_vec()
-        };
+            todo = pick.iter().map(|n| (vec![n.clone()], seg_start(n) + Duration::minutes(10))).collect();
+        }
         let _ = fs::create_dir_all(self.out_dir());
         let known = self.known_projects();
         let mut written = 0;
-        for name in todo {
-            let events = self.load_own(&name);
-            let (pack, apps, active) = self.build_pack(&name, &events, &names);
+        for (segs, end) in todo {
+            let name = segs[0].clone();
+            let mins = (end - seg_start(&name)).num_minutes();
+            let mut events: Vec<Ev> = segs.iter().flat_map(|n| self.load_own(n)).collect();
+            events.sort_by_key(ts);
+            let (pack, apps, active) = self.build_pack(&name, &events, &names, mins);
             if !events.iter().any(|e| !NOISE.contains(&ty(e))) {
                 log(format!("{name}：没有活动事件，跳过"));
                 continue;
             }
             if is_idle(&events) {
-                if self.write_idle(&name) {
+                if self.write_idle(&segs, mins) {
                     written += 1;
                     log(format!("{name}：不在电脑前，不调模型"));
                 }
                 continue;
             }
-            match self.call_model(&pack, &self.prior_summary(&name, &names), &known) {
+            match self.call_model(&pack, &self.prior_summary(&name, &names), &known, mins) {
                 Ok((j, usage)) => {
                     let _ = fs::remove_file(self.backoff_path());
-                    for p in self.existing(&name) {
+                    for p in segs.iter().flat_map(|n| self.existing(n)) {
                         let _ = fs::remove_file(p); // 指定重写时换掉旧的
                     }
-                    let out = self.out_dir().join(format!("{}-{}-10min-memory-summary.md", name.trim_end_matches('Z'), suffix()));
-                    match fs::write(&out, self.render(&name, &j, &apps, active)) {
+                    let out = self.out_dir().join(format!("{}-{}-{mins}min-memory-summary.md", name.trim_end_matches('Z'), suffix()));
+                    match fs::write(&out, self.render(&segs, &j, &apps, active)) {
                         Ok(_) => {
                             written += 1;
                             let u = |k: &str| usage.get(k).map(|v| v.to_string()).unwrap_or_else(|| "?".into());
@@ -1156,7 +1202,7 @@ const ACTIVITY_GUIDE: &str = "    activity 只能填下面的二级类型（如�
 /// 总结用英文写时接在提示词后面：规定只能填中文选项的字段照原样，给人看的文字都用英文
 const EN_NOTE: &str = "输出语言：英文（这一条优先于上面「全部用中文」的要求）。JSON 的字段名，以及 activity、domain 这类规定只能从中文选项里选的字段，照原样填中文；project 照「已有的项目名」的写法。除此之外所有给人看的文字（标题、描述、经过、线索、一句话、点评、做成了什么、偏离、明天等）都用英文（English）写，对用户用 you。引文用英文原文或通行英译，出处也写英文。";
 
-const ROLLUP_PROMPT: &str = "你是电脑活动记录员。下面是用户电脑上一个小时里每 10 分钟的摘要。请把它们合成这一小时的摘要，全部用中文，用第二人称「你」。
+const ROLLUP_PROMPT: &str = "你是电脑活动记录员。下面是用户电脑上一个小时里分段写的摘要（每行是一段的起止时刻、标题和概括）。请把它们合成这一小时的摘要，全部用中文，用第二人称「你」。
 只写摘要里有的事，不编造，不要写「材料未显示」这类话，不写具体分钟数。
 只返回一个 JSON 对象，不要代码块，字段：
   title: 15 字以内的标题，写这一小时的主线
@@ -1515,9 +1561,7 @@ impl Summarizer {
         let mut n = 0;
         for p in read_dir_sorted(&self.out_dir()) {
             let f = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
-            if !f.ends_with("-10min-memory-summary.md") || f.len() < 19 {
-                continue;
-            }
+            let Some(mins) = summary_minutes(&f).filter(|_| f.len() >= 19) else { continue };
             let md = fs::read_to_string(&p).unwrap_or_default();
             let fm = front(&md);
             if fm.contains_key("parts") {
@@ -1525,8 +1569,10 @@ impl Summarizer {
             }
             let name = format!("{}Z", &f[..19]);
             let idle = fm.get("title").and_then(Value::as_str) == Some(IDLE_TITLE);
-            let events = self.load_own(&name);
-            let active = if idle || events.is_empty() { 0 } else { self.build_pack(&name, &events, &names).2 };
+            let t = seg_start(&name);
+            let mut events: Vec<Ev> = names.iter().filter(|n| seg_start(n) >= t && seg_start(n) < t + Duration::minutes(mins)).flat_map(|n| self.load_own(n)).collect();
+            events.sort_by_key(ts);
+            let active = if idle || events.is_empty() { 0 } else { self.build_pack(&name, &events, &names, mins).2 };
             let parts = if idle {
                 vec![]
             } else {
@@ -1566,8 +1612,8 @@ impl Summarizer {
         n
     }
 
-    /// 小时摘要：一个小时结束、里面有活动的分段都写好了 10 分钟摘要，就把它们合成一段
-    /// （整小时都不在电脑前就不调模型）。写到 summaries-1h/<UTC 小时>-1h.md。返回写了几段
+    /// 小时摘要：一个小时结束、里面有活动的分段都写好了摘要，就把它们合成一段
+    /// （整小时都不在电脑前、或只有一份有活动的，不调模型）。写到 summaries-1h/<UTC 小时>-1h.md。返回写了几段
     pub fn rollups(&self, mut log: impl FnMut(String)) -> usize {
         let names = self.segment_names();
         let now = Utc::now();
@@ -1582,11 +1628,18 @@ impl Summarizer {
                 continue;
             }
             let segs: Vec<&String> = names.iter().filter(|x| x.starts_with(&h)).collect();
-            let mut rows = vec![];
+            // （这份摘要的起始分段, 管几分钟, 头部字段）；间隔调长后几个分段共用一份，只算一次
+            let mut rows: Vec<(String, i64, Map<String, Value>)> = vec![];
+            let mut seen = HashSet::new();
             let mut ready = true;
             for seg in &segs {
                 match self.existing(seg).first() {
-                    Some(p) => rows.push((seg.to_string(), front(&fs::read_to_string(p).unwrap_or_default()))),
+                    Some(p) => {
+                        let f = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+                        if seen.insert(f.clone()) {
+                            rows.push((format!("{}Z", &f[..19]), summary_minutes(&f).unwrap_or(10), front(&fs::read_to_string(p).unwrap_or_default())));
+                        }
+                    }
                     None => {
                         // 有活动却还没摘要：等下一轮（没活动的分段本来就不写摘要）
                         if self.load(seg).iter().any(|e| !NOISE.contains(&ty(e))) {
@@ -1601,7 +1654,7 @@ impl Summarizer {
             // 按秒累计项目和类型
             let mut agg: Vec<(String, String, f64)> = vec![];
             let mut active = 0i64;
-            for (_, fm) in &rows {
+            for (_, _, fm) in &rows {
                 let sec = fm.get("active_sec").and_then(Value::as_i64).unwrap_or(0);
                 active += sec;
                 for x in fm.get("parts").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -1615,15 +1668,18 @@ impl Summarizer {
             }
             agg.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
             let parts = Value::Array(agg.iter().map(|(a, p, v)| json!({"activity": a, "project": p, "sec": v.round() as i64})).collect());
-            let all_idle = rows.iter().all(|(_, fm)| fm.get("title").and_then(Value::as_str) == Some(IDLE_TITLE));
-            let (title, desc) = if all_idle {
+            let busy: Vec<&Map<String, Value>> = rows.iter().map(|r| &r.2).filter(|fm| fm.get("title").and_then(Value::as_str) != Some(IDLE_TITLE)).collect();
+            let g = |fm: &Map<String, Value>, k: &str| fm.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            let (title, desc) = if busy.is_empty() {
                 (IDLE_TITLE.to_string(), "这一小时没有键鼠操作（离开、锁屏或睡眠）。".to_string())
+            } else if busy.len() == 1 {
+                // 只有一份有活动的（间隔 1 小时，或这小时只用了一会儿）：直接用它，不再问模型
+                (g(busy[0], "title"), g(busy[0], "description"))
             } else {
                 let mut user = String::new();
-                for (seg, fm) in &rows {
+                for (seg, mins, fm) in &rows {
                     let t = seg_start(seg);
-                    let g = |k: &str| fm.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-                    user += &format!("{}–{} 〔{}〕{}\n", hms(t)[..5].to_string(), hms(t + Duration::minutes(10))[..5].to_string(), g("title"), g("description"));
+                    user += &format!("{}–{} 〔{}〕{}\n", hms(t)[..5].to_string(), hms(t + Duration::minutes(*mins))[..5].to_string(), g(fm, "title"), g(fm, "description"));
                 }
                 match self.chat("hourly", ROLLUP_PROMPT, &user) {
                     Ok((j, _)) => (
@@ -1700,5 +1756,38 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         assert!(!act.spans.is_empty(), "没算出在电脑前的时间");
         assert_eq!(act.windows.first().map(|w| w.2.as_str()), Some("msedge"));
+    }
+
+    /// 摘要间隔 30 分钟：同一个间隔的分段并成一份，文件名写管多长；间隔中途改的，从第一段没写的写到间隔结束
+    /// （分段都不在电脑前，走固定摘要，不调模型）
+    #[test]
+    fn summary_interval() {
+        assert_eq!(summary_minutes("2026-10-16T06-00-00-ab12-30min-memory-summary.md"), Some(30));
+        assert_eq!(summary_minutes("2026-10-16T06-00-00-ab12-6h-memory-summary.md"), None);
+        let root = std::env::temp_dir().join(format!("beayy-every-{}", std::process::id()));
+        let dev = root.join("devices").join(beayy_core::local_device()).join("segments");
+        for m in ["06-00", "06-10", "06-20", "06-30", "07-00", "07-10", "07-20"] {
+            let seg = dev.join(format!("2026-10-16T{m}-00Z"));
+            fs::create_dir_all(&seg).unwrap();
+            let t = format!("2026-10-16T{}:{}:30Z", &m[..2], &m[3..]);
+            fs::write(seg.join("events.jsonl"), format!("{{\"event_type\":\"presence\",\"state\":\"idle\",\"timestamp\":\"{t}\"}}\n")).unwrap();
+        }
+        fs::write(root.join("settings.json"), r#"{"summary_minutes": 30}"#).unwrap();
+        let s = Summarizer::new(root.clone());
+        fs::create_dir_all(s.out_dir()).unwrap();
+        fs::write(s.out_dir().join("2026-10-16T07-00-00-test-10min-memory-summary.md"), "---\ntitle: 旧的\n---\n").unwrap();
+        assert_eq!(s.every(), 30);
+        assert_eq!(s.run(&[], |_| {}), 3);
+        let files: Vec<String> = read_dir_sorted(&s.out_dir()).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        let starts: Vec<(String, Option<i64>)> = files.iter().map(|f| (f[11..16].to_string(), summary_minutes(f))).collect();
+        assert_eq!(starts, vec![("06-00".into(), Some(30)), ("06-30".into(), Some(30)), ("07-00".into(), Some(10)), ("07-10".into(), Some(20))]);
+        assert!(s.existing("2026-10-16T06-20-00Z")[0].to_string_lossy().contains("T06-00-00-"));
+        assert!(s.existing("2026-10-16T07-20-00Z")[0].to_string_lossy().contains("T07-10-00-"));
+        assert!(fs::read_to_string(s.out_dir().join(&files[0])).unwrap().contains("这 30 分钟没有键鼠操作"));
+        assert_eq!(s.run(&[], |_| {}), 0, "写过的不再写");
+        s.rollups(|_| {});
+        let hour = fs::read_to_string(s.rollup_dir().join("2026-10-16T06-00-00-1h.md")).unwrap();
+        let _ = fs::remove_dir_all(&root);
+        assert!(hour.contains("segments: [2026-10-16T06-00-00Z, 2026-10-16T06-30-00Z]"), "{hour}");
     }
 }
