@@ -3135,7 +3135,7 @@ const accountChanged = () => { DS.account = null; SS.llm = null; return renderSe
 const officialLogin = () => loginDialog("login", "", !["none", "server"].includes(syncWay(S.sync)));
 
 /** 登录、注册、用恢复码重设（小弹层，底下可以互相切换） */
-function loginDialog(mode = "login", email = "", svc = false) {
+function loginDialog(mode = "login", email = "", svc = false, after = accountChanged) {
   const sy = S.sync || {};
   const cmd = (c) => (svc ? c.replace("account_", "account_service_") : c);
   const em = dlgField("em", tr("邮箱"), { ph: "you@example.com", value: email || sy.email || "" });
@@ -3153,12 +3153,12 @@ function loginDialog(mode = "login", email = "", svc = false) {
   const server = cf.sync_server ? `<p class="note">${tr("服务器 {host}", { host: `<span class="mono">${esc(hostOf(cf.sync_server))}</span>` })}${sy.configured ? "" : ` <button class="mx-btn mx-btn--text mx-btn--sm" data-server>${tr("更改")}</button>`}</p>` : "";
   openDialog({
     title, ok, busy,
-    body: (mode === "recover" ? `<p class="note">${tr("重设后，其他设备要重新登录")}</p>` : `<p class="note">${svc ? gap(tr("只用来开官方模型、转写和地图，还用{way}同步", { way: wayName(syncWay(S.sync)) })) : tr("记录在本机加密后再同步，服务器读不到内容")}</p>`) + body
+    body: (mode === "recover" ? `<p class="note">${tr("重设后，其他设备要重新登录")}</p>` : `<p class="note">${!svc ? tr("记录在本机加密后再同步，服务器读不到内容") : syncWay(S.sync) === "none" ? tr("只用来开官方模型、转写和地图") : gap(tr("只用来开官方模型、转写和地图，还用{way}同步", { way: wayName(syncWay(S.sync)) }))}</p>`) + body
       + server + `<div class="dlg-links">${links.map(([k, v]) => `<button class="mx-btn mx-btn--text mx-btn--sm" data-to="${k}">${v}</button>`).join("")}</div>`,
     onOpen: (el) => {
-      el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => loginDialog(b.dataset.to, dlgVal(el, "em"), svc)));
+      el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => loginDialog(b.dataset.to, dlgVal(el, "em"), svc, after)));
       const sv = el.querySelector("[data-server]");
-      if (sv) sv.onclick = () => { const em = dlgVal(el, "em"); syncServerDialog(() => loginDialog(mode, em, svc)); };
+      if (sv) sv.onclick = () => { const em = dlgVal(el, "em"); syncServerDialog(() => loginDialog(mode, em, svc, after)); };
       // 注册：问服务器要不要邀请码；开放注册的写明每个账号能存多少，满了怎么办
       if (mode === "signup") call("signup_info").then((i) => {
         const box = el.querySelector("#inv-box"), note = el.querySelector("#inv-note");
@@ -3166,7 +3166,7 @@ function loginDialog(mode = "login", email = "", svc = false) {
         box.hidden = !i.invite;
         note.textContent = i.invite ? tr("没有邀请码也能用：记录都在本机；要多台设备同步，可以在「设置 → 连接 → 同步方式」里选同步文件夹，或自己部署服务端")
           : i.open === false ? tr("这台服务器暂停注册了。可以先不登录（记录都在本机），或者在「设置 → 连接 → 同步方式」里选同步文件夹")
-          : i.quota ? tr("每个账号能存 {q}，满了以后新记录只在本机，不再上传", { q: bytesText(i.quota) }) : "";
+          : i.quota && !svc ? tr("每个账号能存 {q}，满了以后新记录只在本机，不再上传", { q: bytesText(i.quota) }) : "";
       }).catch(() => { const b = el.querySelector("#inv-box"); if (b) b.hidden = false; });
     },
     submit: async (el) => {
@@ -3175,7 +3175,7 @@ function loginDialog(mode = "login", email = "", svc = false) {
       if (mode === "login") await call(cmd("account_login"), { email, password: el.querySelector("#pw1").value });
       else if (mode === "signup") { const code = await call(cmd("account_signup"), { invite: dlgVal(el, "inv"), email, password: checkPw(el) }); setTimeout(() => codeDialog(code, true)); }
       else { await call(cmd("account_recover"), { email, code: dlgVal(el, "rc"), password: checkPw(el) }); AC.msg = tr("已重设，其他设备要重新登录"); }
-      accountChanged();
+      after();
     },
   });
 }
@@ -3786,8 +3786,11 @@ async function renderOnboarding() {
   document.documentElement.classList.add("onboarding");
   if (!S.settings) { S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings)); }
   const st = (S.status = await call("get_status"));
+  S.sync = await call("sync_status").catch(() => S.sync || {});
   const perm = st.permissions || {};
   const steps = [tr("这是什么"), tr("授权"), tr("模型"), tr("同步")];
+  // 官方模型要一个 Beayy 账号：在这一步就注册或登录（只为官方服务，同步下一步另选）
+  const who = S.sync.service_email || (syncWay(S.sync) === "server" && S.sync.email);
   const dots = `<div class="ob-steps">${steps.map((x, i) => `<span class="${i === OB.step ? "is-on" : i < OB.step ? "done" : ""}">${i + 1}. ${x}</span>`).join("")}</div>`;
   const permRow = (kind, name, desc) => `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${name}</div><div class="mx-setting-desc">${desc}</div></div>
     <span class="mx-status mx-status--${perm[kind] ? "ok" : "warn"}">${perm[kind] ? tr("已授权") : tr("未授权")}</span>${perm[kind] ? "" : `<button class="mx-btn mx-btn--secondary mx-btn--sm" data-perm="${kind}">${tr("去授权")}</button>`}</div>`;
@@ -3806,7 +3809,8 @@ async function renderOnboarding() {
      ${permRow("full_disk_access", tr("完全磁盘访问（可选）"), `${tr("读取 iPhone 的屏幕使用时间")} · ${howto("screentime", tr("怎么设置"))}`)}`,
     `<h2>${tr("模型")}</h2><p class="ob-lead">${tr("摘要和日总结要用一个大模型。用官方的：账号开通后登录就能用，不用填；也可以填自己的网关（任何兼容 OpenAI 接口的服务）。不配也照常记录，时间线先只列用过的 app，以后在设置里改。")}</p>
      <div class="mx-seg" role="tablist" id="ob-mode" style="margin-bottom:var(--space-4)">${[["official", tr("用官方")], ["custom", tr("自己的网关")]].map(([k, v]) => `<button role="tab" aria-selected="${k === OB.mode}" class="${k === OB.mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>
-     ${OB.mode === "official" ? `<p class="note">${tr("下一步注册或登录；新账号每月送 5 万 token，够试用，天天用要填自己的网关")}</p>` : `<div class="stack"><div class="mx-field"><label for="ob-gw">${tr("接口地址")}</label><input class="mx-input mono" id="ob-gw" value="${esc(S.draft.gateway || "https://api.openai.com/v1")}"></div>
+     ${OB.mode === "official" ? (who ? `<p class="note">${tr("已登录 {email}", { email: esc(who) })}</p>`
+       : `<p class="note">${tr("新账号每月送 5 万 token，够试用，天天用要填自己的网关")}</p><div class="btns sync-btns"><button class="mx-btn mx-btn--secondary" id="ob-signup">${tr("注册")}</button><button class="mx-btn mx-btn--text" id="ob-login">${tr("已有账号，登录")}</button></div>`) : `<div class="stack"><div class="mx-field"><label for="ob-gw">${tr("接口地址")}</label><input class="mx-input mono" id="ob-gw" value="${esc(S.draft.gateway || "https://api.openai.com/v1")}"></div>
        <div class="mx-field"><label for="ob-model">${tr("模型名")}</label><input class="mx-input mono" id="ob-model" value="${esc(S.draft.model_segment || "")}" placeholder="${tr("比如 gpt-4.1-mini")}"></div>
        <div class="mx-field"><label for="ob-key">${tr("密钥")}</label><input class="mx-input mono" id="ob-key" type="password" autocomplete="off" placeholder="${S.settings.has_api_key ? tr("已经存过一把，不改就留空") : "sk-…"}"></div>
        <div class="btns sync-btns"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ob-test" ${OB.busy ? "disabled" : ""}>${OB.busy ? tr("测试中…") : tr("存下并测试一下")}</button></div></div>`}`,
@@ -3846,6 +3850,8 @@ async function renderOnboarding() {
     location.hash = to; route();
   };
   on("ob-account", () => { SS.tab = "data"; finish("#/settings"); });
+  on("ob-signup", () => loginDialog("signup", "", true, renderOnboarding));
+  on("ob-login", () => loginDialog("login", "", true, renderOnboarding));
   on("ob-next", async () => {
     if (OB.step === 2 && OB.mode === "official") { S.draft = { ...S.draft, model_mode: "official" }; await call("save_settings", { settings: { model_mode: "official" } }); }
     else if (OB.step === 2 && (document.getElementById("ob-model").value.trim() || document.getElementById("ob-key").value.trim())) { try { await saveModel(); } catch (x) { OB.err = String(x); return renderOnboarding(); } }

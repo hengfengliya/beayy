@@ -800,7 +800,6 @@ window.I18N_EN = {
   "完全磁盘访问（可选）": "Full Disk Access (optional)",
   "摘要和日总结要用一个大模型。用官方的：账号开通后登录就能用，不用填；也可以填自己的网关（任何兼容 OpenAI 接口的服务）。不配也照常记录，时间线先只列用过的 app，以后在设置里改。": "Summaries and daily reviews need a large language model. Use the official one: once your account is enabled, just sign in. Or enter your own gateway (any OpenAI-compatible service). Without one, recording still works and the timeline just lists the apps you used; you can set it up later in Settings.",
   "用官方": "Use official",
-  "下一步注册或登录；新账号每月送 5 万 token，够试用，天天用要填自己的网关": "Sign up or sign in next. New accounts get 50,000 tokens a month, enough to try it out. For daily use, add your own gateway",
   "接口地址": "API URL",
   "模型名": "Model name",
   "已经存过一把，不改就留空": "Already saved. Leave blank to keep",
@@ -1615,5 +1614,9 @@ window.I18N_EN = {
   "只用来开官方模型、转写和地图，还用{way}同步": "Only for the official model, transcription and map. Sync stays on {way}",
   "Beayy 账号": "Beayy account",
   "官方模型、转写、地图用": "for the official model, transcription and map",
-  "没用 Beayy 服务同步": "Not syncing with Beayy service"
+  "没用 Beayy 服务同步": "Not syncing with Beayy service",
+  "已有账号，登录": "I have an account",
+  "已登录 {email}": "Signed in as {email}",
+  "新账号每月送 5 万 token，够试用，天天用要填自己的网关": "New accounts get 50k tokens a month, enough to try it out. For daily use, add your own gateway",
+  "只用来开官方模型、转写和地图": "Only for the official model, transcription and map"
 };
