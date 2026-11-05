@@ -79,12 +79,12 @@ enum BlobFile {
             let stub = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
             if fm.fileExists(atPath: stub.path) {
                 try? fm.startDownloadingUbiquitousItem(at: url)
-                throw ServiceError("iCloud 还没下载下来，稍后再试")
+                throw ServiceError(tr("iCloud 还没下载下来，稍后再试"))
             }
-            throw ServiceError("没有这个文件", status: 404)
+            throw ServiceError(tr("没有这个文件"), status: 404)
         }
         var err: NSError?
-        var out: Result<Data, Error> = .failure(ServiceError("读不了"))
+        var out: Result<Data, Error> = .failure(ServiceError(tr("读不了")))
         NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &err) { u in
             out = Result { try Data(contentsOf: u) }
         }
@@ -100,7 +100,7 @@ enum WebDAV {
     private static var made: Set<String> = []
 
     static func request(_ base: String, _ auth: String, _ rel: String, method: String = "GET") throws -> URLRequest {
-        guard let url = URL(string: "\(base)/\(rel)") else { throw ServiceError("WebDAV 地址不对") }
+        guard let url = URL(string: "\(base)/\(rel)") else { throw ServiceError(tr("WebDAV 地址不对")) }
         var r = URLRequest(url: url)
         r.httpMethod = method
         r.setValue(auth, forHTTPHeaderField: "Authorization")

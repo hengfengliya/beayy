@@ -20,6 +20,7 @@ mod update;
 #[cfg(target_os = "macos")]
 mod devhook;
 
+use beayy_core::i18n::{tr, tr_msg, tr_with};
 use beayy_core::{data_root, fields, local_device, shadow_mode, EventLog};
 use beayy_phone::PhoneSync;
 use beayy_remote::Relay;
@@ -206,12 +207,7 @@ fn open_main(app: &AppHandle) {
 fn permission_line() -> String {
     let p = beayy_capture::permissions();
     let mark = |b: bool| if b { "✓" } else { "✗" };
-    format!(
-        "辅助功能 {} · 输入监控 {} · 完全磁盘访问 {}",
-        mark(p.accessibility),
-        mark(p.input_monitoring),
-        mark(p.full_disk_access)
-    )
+    tr_with("辅助功能 {a} · 输入监控 {b} · 完全磁盘访问 {c}", &[("a", mark(p.accessibility)), ("b", mark(p.input_monitoring)), ("c", mark(p.full_disk_access))])
 }
 
 /// 菜单栏图标旁的「!」：缺权限或监听没装上
@@ -462,7 +458,7 @@ fn main() {
             data::get_profile, data::save_profile, data::list_projects, data::merge_project, data::set_project_domain,
             sync::sync_status, sync::sync_now,
             sync::account_signup, sync::account_login, sync::account_claim, sync::account_recover, sync::account_password,
-            sync::account_info, sync::account_remove_device, sync::account_logout, sync::account_recovery_code, sync::signup_info, sync::folder_state, sync::folder_create, sync::folder_join, sync::folder_recover, sync::pick_folder,
+            sync::account_info, sync::account_remove_device, sync::account_logout, sync::account_service_login, sync::account_service_signup, sync::account_service_recover, sync::account_service_logout, sync::account_stop_sync, sync::account_recovery_code, sync::signup_info, sync::folder_state, sync::folder_create, sync::folder_join, sync::folder_recover, sync::pick_folder,
             sync::webdav_state, sync::webdav_create, sync::webdav_join, sync::webdav_recover, sync::icloud_state, sync::icloud_create, sync::icloud_join, sync::icloud_recover,
             update::update_status, update::update_check, update::update_apply
         ])
@@ -508,15 +504,17 @@ fn main() {
             }
 
             // 菜单栏：标志模板图（系统按深浅色菜单栏自动反色）＋菜单
-            let title = MenuItem::with_id(app, "title", if shadow_mode() { "Beayy 测试版（数据写影子目录，不算正式记录）".to_string() } else { PRODUCT.into() }, false, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "打开 Beayy", true, None::<&str>)?;
+            // 菜单文字走和网页同一张译文表（beayy_core::i18n）；下面每 5 秒刷新一次，界面换了语言跟着变
+            let title_text = || if shadow_mode() { tr("Beayy 测试版（数据写影子目录，不算正式记录）") } else { PRODUCT.into() };
+            let title = MenuItem::with_id(app, "title", title_text(), false, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", tr("打开 Beayy"), true, None::<&str>)?;
             let perm = MenuItem::with_id(app, "perm", permission_line(), true, None::<&str>)?;
-            let tap = MenuItem::with_id(app, "tap", "键鼠监听：启动中", false, None::<&str>)?;
-            let phone = MenuItem::with_id(app, "phone", "iPhone：读取中", false, None::<&str>)?;
-            let pause = MenuItem::with_id(app, "pause", "暂停记录", true, None::<&str>)?;
-            let data = MenuItem::with_id(app, "data", "打开数据目录", true, None::<&str>)?;
-            let login = CheckMenuItem::with_id(app, "login", "开机自动启动", cfg!(any(target_os = "macos", target_os = "windows")), login_item(), None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let tap = MenuItem::with_id(app, "tap", tr("键鼠监听：启动中"), false, None::<&str>)?;
+            let phone = MenuItem::with_id(app, "phone", tr("iPhone：读取中"), false, None::<&str>)?;
+            let pause = MenuItem::with_id(app, "pause", tr("暂停记录"), true, None::<&str>)?;
+            let data = MenuItem::with_id(app, "data", tr("打开数据目录"), true, None::<&str>)?;
+            let login = CheckMenuItem::with_id(app, "login", tr("开机自动启动"), cfg!(any(target_os = "macos", target_os = "windows")), login_item(), None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", tr("退出"), true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let sep3 = PredefinedMenuItem::separator(app)?;
@@ -525,7 +523,7 @@ fn main() {
             TrayIconBuilder::with_id("main")
                 .icon(icon)
                 .icon_as_template(true)
-                .tooltip(if shadow_mode() { "Beayy 测试版" } else { PRODUCT })
+                .tooltip(if shadow_mode() { tr("Beayy 测试版") } else { PRODUCT.into() })
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, e| match e.id.as_ref() {
@@ -575,7 +573,7 @@ fn main() {
                         None,
                     );
                 }
-                let _ = phone_item.set_text(format!("iPhone：{}", st.phone.lock().unwrap().last_summary));
+                let _ = phone_item.set_text(tr_with("iPhone：{s}", &[("s", &tr_msg(&st.phone.lock().unwrap().last_summary))]));
                 let mut waited = Duration::ZERO;
                 while waited < PHONE_EVERY && !phone_now2.swap(false, Ordering::Relaxed) && !PHONE_NOW.swap(false, Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_secs(1));
@@ -612,7 +610,8 @@ fn main() {
                     }
                     fda = p.full_disk_access;
                     let _ = perm.set_text(permission_line());
-                    let _ = tap.set_text(if capturing() { "键鼠监听：运行中" } else { "键鼠监听：未启动" });
+                    let _ = tap.set_text(tr(if capturing() { "键鼠监听：运行中" } else { "键鼠监听：未启动" }));
+                    let _ = (title.set_text(title_text()), open.set_text(tr("打开 Beayy")), data.set_text(tr("打开数据目录")), login.set_text(tr("开机自动启动")), quit_item.set_text(tr("退出")));
                     // 定时暂停到点：自动继续
                     let due = st.paused_until.lock().unwrap().map(|t| t <= chrono::Utc::now()).unwrap_or(false);
                     if due {
@@ -620,7 +619,7 @@ fn main() {
                         apply_paused(&st, false);
                     }
                     let paused = st.paused.load(Ordering::Relaxed);
-                    let _ = pause.set_text(if paused { "继续记录" } else { "暂停记录" });
+                    let _ = pause.set_text(tr(if paused { "继续记录" } else { "暂停记录" }));
                     let _ = login.set_checked(login_item());
                     if let Some(tray) = handle.tray_by_id("main") {
                         let _ = tray.set_title(if tray_ok() { None } else { Some("!") });

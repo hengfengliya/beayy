@@ -1,0 +1,3 @@
+/* 由 tools/生成InfoPlist译文.py 生成，勿手改：中文在 Info.plist，英文在 ui/locales/en.js */
+"NSLocationWhenInUseUsageDescription" = "While recording, also notes where you stay (arrival, departure and place). Your route isn’t recorded.";
+"NSMicrophoneUsageDescription" = "All-day recording, transcribed into your life record.";

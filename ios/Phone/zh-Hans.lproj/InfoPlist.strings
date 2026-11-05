@@ -1,0 +1,6 @@
+/* 由 tools/生成InfoPlist译文.py 生成，勿手改：中文在 Info.plist，英文在 ui/locales/en.js */
+"NSHealthShareUsageDescription" = "读苹果健康里的数据（睡眠、步数、锻炼、心率、心情等），加密后同步到你自己的电脑，放进每天的记录和总结。只读，不写。";
+"NSHealthUpdateUsageDescription" = "Beayy 不往健康里写数据。";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "选「始终允许」才能在不打开 app 时记下停留点。只记停留的地方，不记路上的轨迹。";
+"NSLocationWhenInUseUsageDescription" = "记下你在哪些地方停留过（到达、离开时间和地点），用来统计在家、在公司、在外面各多久，并给对话标上地点。";
+"NSMicrophoneUsageDescription" = "全天录音（没戴手表时用 iPhone 录），转成文字后记进你的人生记录；也用来录一段声纹认出你。";

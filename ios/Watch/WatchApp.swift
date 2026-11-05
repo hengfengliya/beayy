@@ -47,7 +47,7 @@ struct WatchHome: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 8) {
-                Status(level: recorder.isRecording ? .ok : .none, text: recorder.isRecording ? "在录" : "没在录",
+                Status(level: recorder.isRecording ? .ok : .none, text: recorder.isRecording ? tr("在录") : tr("没在录"),
                        dot: recorder.isRecording ? Theme.watch : nil)
                 if recorder.isRecording, let since = recorder.since {
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in
@@ -57,7 +57,7 @@ struct WatchHome: View {
                             .foregroundStyle(Theme.ink)
                     }
                 } else {
-                    Text("全天录音").font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text(tr("全天录音")).font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.ink)
                 }
                 RoundRecordButton(recording: recorder.isRecording, size: 60) {
                     recorder.isRecording ? recorder.stop() : recorder.start()
@@ -65,7 +65,7 @@ struct WatchHome: View {
                 .padding(.vertical, 2)
                 location
                 if transfer.pending > 0 {
-                    Text("\(transfer.pending) 段等着送到 iPhone").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                    Text(tr("{n} 段等着送到 iPhone", ["n": "\(transfer.pending)"])).font(.system(size: 13)).foregroundStyle(Theme.ink3)
                 }
                 if let m = recorder.message {
                     Text(m).font(.system(size: 13)).foregroundStyle(Theme.warnInk).multilineTextAlignment(.center)
@@ -78,14 +78,14 @@ struct WatchHome: View {
     @ViewBuilder private var location: some View {
         if !places.ready {
             Button { places.requestPermission() } label: {
-                Label("位置没开", systemImage: "location.slash").font(.system(size: 13)).foregroundStyle(Theme.warnInk)
+                Label(tr("位置没开"), systemImage: "location.slash").font(.system(size: 13)).foregroundStyle(Theme.warnInk)
             }
             .buttonStyle(.plain)
         } else if recorder.isRecording {
-            Label(places.stayed.map { $0 >= StayDetector.minStay ? "在这里 \(spanText($0))" : "刚到" } ?? "在取位置",
+            Label(places.stayed.map { $0 >= StayDetector.minStay ? tr("在这里 {t}", ["t": spanText($0)]) : tr("刚到") } ?? tr("在取位置"),
                   systemImage: "location").font(.system(size: 13)).foregroundStyle(Theme.ink3)
         } else {
-            Text("今天记了 \(places.today) 处").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+            Text(tr("今天记了 {n} 处", ["n": "\(places.today)"])).font(.system(size: 13)).foregroundStyle(Theme.ink3)
         }
     }
 }

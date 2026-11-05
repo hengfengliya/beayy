@@ -17,10 +17,10 @@ enum SyncCrypto {
 
     /// 主密码＋盐（hex）→ (登录校验值 hex, 包钥)
     static func derive(password: String, saltHex: String) throws -> (auth: String, wrap: Data) {
-        guard let salt = unhex(saltHex), salt.count == sodium.pwHash.SaltBytes else { throw Failure("服务器给的盐不对") }
+        guard let salt = unhex(saltHex), salt.count == sodium.pwHash.SaltBytes else { throw Failure(tr("服务器给的盐不对")) }
         guard let master = sodium.pwHash.hash(outputLength: 32, passwd: Array(password.utf8), salt: Array(salt),
                                               opsLimit: 3, memLimit: 64 * 1024 * 1024, alg: .Argon2ID13)
-        else { throw Failure("主密码派生失败（内存不够？）") }
+        else { throw Failure(tr("主密码派生失败（内存不够？）")) }
         let ikm = SymmetricKey(data: master)
         let auth = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, info: Data("beayy auth".utf8), outputByteCount: 32)
         let wrap = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, info: Data("beayy wrap".utf8), outputByteCount: 32)
@@ -29,11 +29,11 @@ enum SyncCrypto {
 
     /// 解开服务器存的数据密钥
     static func unwrapKey(_ wrapped: String, wrap: Data) throws -> Data {
-        guard let b = b64url(wrapped), b.count > 24 else { throw Failure("服务器给的数据密钥坏了") }
+        guard let b = b64url(wrapped), b.count > 24 else { throw Failure(tr("服务器给的数据密钥坏了")) }
         guard let key = sodium.aead.xchacha20poly1305ietf.decrypt(nonceAndAuthenticatedCipherText: Array(b), secretKey: Array(wrap),
                                                                    additionalData: Array("beayy-data-key".utf8))
-        else { throw Failure("主密码不对，解不开数据密钥") }
-        guard key.count == 32 else { throw Failure("数据密钥长度不对") }
+        else { throw Failure(tr("主密码不对，解不开数据密钥")) }
+        guard key.count == 32 else { throw Failure(tr("数据密钥长度不对")) }
         return Data(key)
     }
 
@@ -41,27 +41,27 @@ enum SyncCrypto {
         let packed = try deflate(plain)
         guard let out: Bytes = sodium.aead.xchacha20poly1305ietf.encrypt(message: Array(packed), secretKey: Array(key),
                                                                          additionalData: Array("\(device)/\(name)".utf8))
-        else { throw Failure("加密失败") }
+        else { throw Failure(tr("加密失败")) }
         return Data(out)
     }
 
     static func open(key: Data, device: String, name: String, blob: Data) throws -> Data {
-        guard blob.count > 24 else { throw Failure("块太短") }
+        guard blob.count > 24 else { throw Failure(tr("块太短")) }
         guard let packed = sodium.aead.xchacha20poly1305ietf.decrypt(nonceAndAuthenticatedCipherText: Array(blob), secretKey: Array(key),
                                                                      additionalData: Array("\(device)/\(name)".utf8))
-        else { throw Failure("解密失败：密钥不对，或块被改过") }
+        else { throw Failure(tr("解密失败：密钥不对，或块被改过")) }
         return try inflate(Data(packed))
     }
 
     // MARK: 压缩（NSData 的 zlib 就是不带头的 raw deflate，同电脑的 miniz_oxide）
 
     static func deflate(_ d: Data) throws -> Data {
-        do { return try (d as NSData).compressed(using: .zlib) as Data } catch { throw Failure("压缩失败") }
+        do { return try (d as NSData).compressed(using: .zlib) as Data } catch { throw Failure(tr("压缩失败")) }
     }
 
     static func inflate(_ d: Data) throws -> Data {
         if d.isEmpty { return Data() }
-        do { return try (d as NSData).decompressed(using: .zlib) as Data } catch { throw Failure("解压失败") }
+        do { return try (d as NSData).decompressed(using: .zlib) as Data } catch { throw Failure(tr("解压失败")) }
     }
 
     // MARK: 编码

@@ -43,6 +43,8 @@ USER_QUOTA = int(float(os.environ.get("BEAYY_USER_QUOTA_MB", "0")) * MB)
 MAX_USERS = int(os.environ.get("BEAYY_MAX_USERS", "0"))
 # 新注册的账号自动开通官方模型，每月这么多 token（0＝不自动开通，要 admin.py open）；转写、地图不跟着开
 NEW_USER_LLM = int(os.environ.get("BEAYY_NEW_USER_LLM_TOKENS", "0") or 0)
+# 新注册的账号官方服务试用几天（0＝不限期）；到期后模型、转写、地图都不能用，要在设置里改用自己的
+NEW_USER_TRIAL_DAYS = float(os.environ.get("BEAYY_NEW_USER_TRIAL_DAYS", "0") or 0)
 # 硬盘剩余低于这么多（GB）就停止注册；再低到一半，连上传也停（不把同一块盘上的别的服务挤爆）
 MIN_FREE = int(float(os.environ.get("BEAYY_MIN_FREE_GB", "20")) * GB)
 # 同一个 IP 每天最多注册几个、整台服务每天最多注册几个
@@ -108,6 +110,9 @@ def init():
     c = db()
     c.execute("PRAGMA journal_mode = WAL")
     c.executescript((HERE / "schema.sql").read_text())
+    # 老库补后加的列（CREATE TABLE IF NOT EXISTS 不会给已有的表加列）
+    if "llm_until" not in {r["name"] for r in c.execute("PRAGMA table_info(users)")}:
+        c.execute("ALTER TABLE users ADD COLUMN llm_until INTEGER NOT NULL DEFAULT 0")
     c.close()
 
 
@@ -326,11 +331,13 @@ def quota(user: str, service: str) -> dict:
     """这一项能不能用：{plan, used, quota} 或 {error, status}"""
     c = db()
     try:
-        u = c.execute("SELECT llm_plan, llm_quota, asr_quota, map_quota FROM users WHERE user = ?", (user,)).fetchone()
+        u = c.execute("SELECT llm_plan, llm_quota, asr_quota, map_quota, llm_until FROM users WHERE user = ?", (user,)).fetchone()
         if not u or not u["llm_plan"]:
             return {"error": "这个账号还没开通官方服务：联系管理员开通，或在设置里改用自己的", "status": 403}
         if u["llm_plan"] == "stopped":
             return {"error": "这个账号的官方服务已停用", "status": 403}
+        if u["llm_until"] and now_ms() > u["llm_until"]:
+            return {"error": "官方服务试用已结束：在设置 → AI → 模型里改用自己的", "status": 403}
         used = usage_of(c, user).get(service, 0)
         q = u[QUOTA_COL[service]] or 0
         if q < 0:
@@ -344,10 +351,12 @@ def quota(user: str, service: str) -> dict:
 
 def services(c: sqlite3.Connection, user: str) -> dict:
     """设置页显示：{plan, month, llm: {used, quota}, asr: {…}, map: {…}}"""
-    u = c.execute("SELECT llm_plan, llm_quota, asr_quota, map_quota FROM users WHERE user = ?", (user,)).fetchone()
+    u = c.execute("SELECT llm_plan, llm_quota, asr_quota, map_quota, llm_until FROM users WHERE user = ?", (user,)).fetchone()
     used = usage_of(c, user)
     one = lambda k: {"used": used.get(k, 0), "quota": (u[QUOTA_COL[k]] if u else 0) or 0}
-    return {"plan": (u["llm_plan"] if u else None) or None, "month": month(), "llm": one("llm"), "asr": one("asr"), "map": one("map")}
+    # until：试用到哪一刻（毫秒），不限期的没有这个键
+    until = {"until": u["llm_until"]} if u and u["llm_until"] else {}
+    return {"plan": (u["llm_plan"] if u else None) or None, "month": month(), **until, "llm": one("llm"), "asr": one("asr"), "map": one("map")}
 
 
 def ticket(user: str, kind: str) -> tuple[str, int]:
@@ -577,7 +586,8 @@ async def register(request: Request):
                   (user, sha256(secrets.token_hex(32)), now_ms(), email, b["salt"], json.dumps(KDF, separators=(",", ":")),
                    sha256(b["auth"]), b["wrapped_key"], sha256(b["recovery"])))
         if NEW_USER_LLM > 0:
-            c.execute("UPDATE users SET llm_plan = 'official', llm_quota = ?, asr_quota = -1, map_quota = -1 WHERE user = ?", (NEW_USER_LLM, user))
+            until = now_ms() + int(NEW_USER_TRIAL_DAYS * 86400 * 1000) if NEW_USER_TRIAL_DAYS > 0 else 0
+            c.execute("UPDATE users SET llm_plan = 'official', llm_quota = ?, asr_quota = -1, map_quota = -1, llm_until = ? WHERE user = ?", (NEW_USER_LLM, until, user))
         count_signup(request)
         return {"user": user, **new_session(c, user, b.get("name"), b.get("device"))}
     finally:
@@ -588,7 +598,7 @@ async def register(request: Request):
 def signup_info():
     """注册前问一下：要不要邀请码、每个账号能存多少（注册框据此显示邀请码一栏和说明）"""
     full = disk_free() < MIN_FREE or bool(MAX_USERS and users_count() >= MAX_USERS)
-    return {"open": OPEN_SIGNUP and not full, "invite": bool(INVITE) and not OPEN_SIGNUP, "quota": USER_QUOTA}
+    return {"open": OPEN_SIGNUP and not full, "invite": bool(INVITE) and not OPEN_SIGNUP, "quota": USER_QUOTA, "trial_days": NEW_USER_TRIAL_DAYS if NEW_USER_LLM > 0 else 0}
 
 
 @router.post("/v2/login")

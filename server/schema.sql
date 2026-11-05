@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
   llm_used INTEGER NOT NULL DEFAULT 0,   -- 本月已用（v4）
   llm_month TEXT,                -- llm_used 记的是哪个月，YYYY-MM（v4，v5 起用量记在 usage 表）
   asr_quota INTEGER NOT NULL DEFAULT 0,  -- 每月转写秒数上限（v5）
-  map_quota INTEGER NOT NULL DEFAULT 0   -- 每月地图调用次数上限（v5）
+  map_quota INTEGER NOT NULL DEFAULT 0,  -- 每月地图调用次数上限（v5）
+  llm_until INTEGER NOT NULL DEFAULT 0   -- 官方服务试用到哪一刻（毫秒，0＝不限；v9，老库由 init 补这一列）
 );
 CREATE TABLE IF NOT EXISTS usage (
   user TEXT NOT NULL,

@@ -30,6 +30,7 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        I18n.init(this)
         WebView.setWebContentsDebuggingEnabled(true)
         web = WebView(this)
         web.settings.javaScriptEnabled = true
@@ -104,11 +105,11 @@ class MainActivity : Activity() {
                 })
                 "open_settings" -> startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
                 "usage_read", "upload_now" -> Usage.read(applicationContext)
-                else -> throw RuntimeException("手机没有这个操作")
+                else -> throw RuntimeException(tr("手机没有这个操作"))
             }
             JSONObject.NULL
         }
-        else -> throw RuntimeException("手机没有这个功能：$cmd")
+        else -> throw RuntimeException(tr("手机没有这个功能：{cmd}", mapOf("cmd" to cmd)))
     }
 
     private fun loggedIn(): Boolean = try {

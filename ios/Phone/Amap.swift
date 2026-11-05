@@ -28,8 +28,8 @@ enum Amap {
         case noKey, bad(String)
         var errorDescription: String? {
             switch self {
-            case .noKey: return "没配高德 Key"
-            case .bad(let s): return "高德没返回结果：\(s)"
+            case .noKey: return tr("没配高德 Key")
+            case .bad(let s): return tr("高德没返回结果：{s}", ["s": s])
             }
         }
     }
@@ -38,7 +38,7 @@ enum Amap {
 
     private static func get(_ path: String, _ q: [String: String]) async throws -> [String: Any] {
         // 电脑上选了 OpenStreetMap：手机不问高德，地名和候选由电脑取、同步过来（10-30）
-        guard Account.shared.mapProvider == "amap" else { throw Failure.bad("用的是 OpenStreetMap，地名由电脑取") }
+        guard Account.shared.mapProvider == "amap" else { throw Failure.bad(tr("用的是 OpenStreetMap，地名由电脑取")) }
         let r: URLRequest
         if Account.shared.amapOfficial, Account.shared.credentials?.isServer == true {
             // 官方服务（香港那台，到高德快），凭地图票据
@@ -54,9 +54,9 @@ enum Amap {
             r = URLRequest(url: c.url!)
         }
         let (data, _) = try await URLSession.shared.data(for: r)
-        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.bad("不是 JSON") }
+        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure.bad(tr("不是 JSON")) }
         if let e = (o["error"] as? String) ?? (o["detail"] as? String) { throw Failure.bad(e) }  // 官方服务：没开通、额度用完
-        guard str(o["status"]) == "1" else { throw Failure.bad(str(o["info"]) ?? "未知") }
+        guard str(o["status"]) == "1" else { throw Failure.bad(str(o["info"]) ?? tr("未知")) }
         return o
     }
 
@@ -92,7 +92,7 @@ enum Amap {
     /// 先挑不是住宅、写字楼的（商场、景区、学校），再挑范围大的（区域要的是大范围：校区而不是里面的一栋楼）；都没有就写街道「…一带」
     static func region(lat: Double, lon: Double, acc: Double) async throws -> Region {
         let o = try await get("geocode/regeo", ["location": location(lat, lon), "extensions": "all", "radius": "100", "roadlevel": "0"])
-        guard let r = o["regeocode"] as? [String: Any] else { throw Failure.bad("没有 regeocode") }
+        guard let r = o["regeocode"] as? [String: Any] else { throw Failure.bad(tr("没有 regeocode")) }
         let comp = r["addressComponent"] as? [String: Any] ?? [:]
         let tolerance = max(15, min(acc / 2, 40))
         let aois = (r["aois"] as? [[String: Any]] ?? []).compactMap { a -> (name: String, type: String, area: Double, d: Double)? in

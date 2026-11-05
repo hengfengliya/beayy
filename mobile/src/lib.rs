@@ -210,6 +210,11 @@ fn dispatch(cmd: &str, a: &Map<String, Value>) -> Result<Value, String> {
         "account_info" => ok(wait(sync::account_info())?),
         "account_remove_device" => ok(wait(sync::account_remove_device(arg(a, "id")?))?),
         "account_logout" => ok(wait(sync::account_logout())),
+        "account_service_login" => ok(wait(sync::account_service_login(arg(a, "email")?, arg(a, "password")?))?),
+        "account_service_signup" => ok(wait(sync::account_service_signup(arg(a, "invite")?, arg(a, "email")?, arg(a, "password")?))?),
+        "account_service_recover" => ok(wait(sync::account_service_recover(arg(a, "email")?, arg(a, "code")?, arg(a, "password")?))?),
+        "account_service_logout" => ok(wait(sync::account_service_logout())),
+        "account_stop_sync" => ok(wait(sync::account_stop_sync())),
         "account_recovery_code" => ok(sync::account_recovery_code()),
         // 不要 Beayy 账号的同步：WebDAV、iCloud（手机上没有任选文件夹，iCloud 就是 iCloud 容器里的同步文件夹）
         "webdav_state" => ok(wait(sync::webdav_state(arg(a, "url")?, arg(a, "user")?, arg(a, "pass")?))),

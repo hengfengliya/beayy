@@ -3,6 +3,8 @@
 name: BeayyRecorder
 options:
   bundleIdPrefix: com.fengli.beayy
+  # 开发语言中文；权限说明另有英文（Phone/、Watch/ 下的 *.lproj/InfoPlist.strings，tools/生成InfoPlist译文.py 生成）
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "26.0"
     watchOS: "26.0"
@@ -19,7 +21,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.2"
-    CURRENT_PROJECT_VERSION: "20"
+    CURRENT_PROJECT_VERSION: "21"
     GENERATE_INFOPLIST_FILE: YES
 targets:
   BeayyPhone:
@@ -72,7 +74,7 @@ targets:
   BeayyPhoneTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests, Phone/SyncCrypto.swift]
+    sources: [Tests, Phone/SyncCrypto.swift, Shared/I18n.swift]
     dependencies:
       - package: Sodium
     settings:
@@ -81,7 +83,12 @@ targets:
   BeayyWatch:
     type: application
     platform: watchOS
-    sources: [Watch, Shared]
+    sources:
+      - Watch
+      - Shared
+      # 界面文字的英文表（Shared/I18n.swift 读），手表只带这一个文件，不带整个 ui
+      - path: ../ui/locales/en.js
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fengli.beayy.ios.watchkitapp

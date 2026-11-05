@@ -59,10 +59,11 @@ pub fn start(log: Arc<EventLog>) {
 /// 账号上的头像和名称比本机新（在别的设备上改过），就拉下来
 fn pull_profile() {
     let root = data_root();
-    if beayy_sync::load(&root).and_then(|a| a.email).is_none() {
+    if beayy_sync::service(&root).and_then(|a| a.email).is_none() {
         return;
     }
-    if let Ok(v) = beayy_sync::account(&root) {
+    let v = if beayy_sync::load(&root).is_some() { beayy_sync::account(&root) } else { beayy_sync::service_account(&root) };
+    if let Ok(v) = v {
         let p = &v["profile"];
         let updated = p["updated"].as_i64().unwrap_or(0);
         if updated > crate::data::profile_updated() {
@@ -101,6 +102,7 @@ fn device_name() -> String {
         Some(("mac", h)) => format!("Mac · {h}"),
         Some(("win", h)) => format!("Windows · {h}"),
         Some(("iosapp", _)) => "iPhone（Beayy）".into(),
+        Some(("android", _)) => "Android（Beayy）".into(),
         _ => d,
     }
 }
@@ -222,7 +224,7 @@ pub async fn icloud_recover(code: String, password: String) -> Result<(), String
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub async fn pick_folder() -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
-    let o = std::process::Command::new("/usr/bin/osascript").args(["-e", "POSIX path of (choose folder with prompt \"选一个同步文件夹\")"]).output();
+    let o = std::process::Command::new("/usr/bin/osascript").args(["-e", &format!("POSIX path of (choose folder with prompt \"{}\")", beayy_core::i18n::tr("选一个同步文件夹"))]).output();
     #[cfg(target_os = "windows")]
     let o = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"])
@@ -281,6 +283,37 @@ pub async fn account_remove_device(id: String) -> Result<(), String> {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub async fn account_logout() {
     beayy_sync::logout(&data_root());
+}
+
+// ---------- 只为官方服务（模型、转写、地图）登的账号：同步用 iCloud、网盘、文件夹或不同步时 ----------
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn account_service_login(email: String, password: String) -> Result<(), String> {
+    beayy_sync::service_login(&data_root(), &server(), &email, &password, &local_device(), &device_name())
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn account_service_signup(invite: String, email: String, password: String) -> Result<String, String> {
+    beayy_sync::service_signup(&data_root(), &server(), invite.trim(), &email, &password, &local_device(), &device_name())
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn account_service_recover(email: String, code: String, password: String) -> Result<(), String> {
+    beayy_sync::service_recover(&data_root(), &server(), &email, &code, &password, &local_device(), &device_name())
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn account_service_logout() {
+    beayy_sync::service_logout(&data_root());
+}
+
+/// 停掉 Beayy 服务同步、登录留给官方服务（换同步方式时用）；没在用 Beayy 服务同步就照常退出
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn account_stop_sync() {
+    let root = data_root();
+    if beayy_sync::keep_for_service(&root).is_err() {
+        beayy_sync::logout(&root);
+    }
 }
 
 #[cfg_attr(not(beayy_mobile), tauri::command)]

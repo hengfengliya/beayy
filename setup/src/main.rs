@@ -133,7 +133,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![info, pick_dir, install, finish])
         .setup(|app| {
             let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("安装 Beayy")
+                .title("Beayy")
                 .inner_size(640.0, 440.0)
                 .resizable(false)
                 .maximizable(false)

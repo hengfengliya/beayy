@@ -481,7 +481,7 @@ pub fn pick_bill_files() -> Result<Vec<String>, String> {
     let o = std::process::Command::new("/usr/bin/osascript")
         .args([
             "-e",
-            "set fs to choose file with prompt \"选微信、支付宝导出的账单\" of type {\"csv\", \"xlsx\", \"public.comma-separated-values-text\", \"org.openxmlformats.spreadsheetml.sheet\"} with multiple selections allowed",
+            &"set fs to choose file with prompt \"{}\" of type {\"csv\", \"xlsx\", \"public.comma-separated-values-text\", \"org.openxmlformats.spreadsheetml.sheet\"} with multiple selections allowed".replacen("{}", &beayy_core::i18n::tr("选微信、支付宝导出的账单"), 1),
             "-e",
             "set out to \"\"",
             "-e",

@@ -10,6 +10,7 @@
 //! - 下载来的设备目录里放一个 `.synced` 标记：换账号、重登录清了状态以后，也不会把别人的数据当成自己的再传上去。
 //! - 上传前先 deflate 压缩，再用 XChaCha20-Poly1305 加密（随机 24 字节 nonce 放在密文前，AAD＝`<设备>/<分段>`）；
 //!   密钥只在设备上（钥匙串），服务器读不到内容。
+//! - 连官方服务时，本机电脑的分段去掉屏幕文字（`ui.text` 的 text）再传，省九成空间；屏幕文字只留在本机（见 lean）。
 //! - 本机写的设备（本机电脑、本机读到的 iPhone）只上传；别的设备只下载，写到同样的位置，读取方不用改。
 //! - 状态在 `<数据根>/sync/state.json`：每个分段上次上传时的大小和修改时间、下载游标、哪些设备是同步来的。
 //! - 账号（v2）：邮箱＋主密码。主密码用 Argon2id 派生成主钥，再用 HKDF 分出「登录校验值」（发给服务器，服务器只存它的哈希）
@@ -30,7 +31,7 @@ use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,7 +49,6 @@ const WEBDAV: &str = "webdav:";
 pub const ICLOUD_CONTAINER: &str = "iCloud.com.fengli.beayy";
 /// 容器里放同步的目录（不放 Documents：不在「文件」app 里露出来，免得被误删）
 const ICLOUD_SUB: &str = "Sync";
-const NO_SERVER: &str = "用的是同步文件夹、iCloud 或 WebDAV，没有服务器：官方模型、转写、地图要换成服务器同步";
 const CODE_PREFIX: &str = "beayy-sync-1:";
 const PARALLEL: usize = 8;
 /// 下载并发：每块都要过一次鉴权查库，单次慢，多开几路
@@ -134,14 +134,22 @@ fn use_keychain() -> bool {
     cfg!(target_os = "macos") && std::env::var("BEAYY_DATA_ROOT").is_err()
 }
 
-fn account_file(root: &Path) -> PathBuf {
-    root.join("sync").join("account")
+/// 存账号的位置：sync＝同步用的；service＝只为官方服务（模型、转写、地图）登的（同步用 iCloud、网盘、文件夹或不同步时）
+const SYNC: &str = "sync";
+const SERVICE: &str = "service";
+
+fn account_file(root: &Path, slot: &str) -> PathBuf {
+    root.join("sync").join(if slot == SYNC { "account" } else { slot })
 }
 
 pub fn load(root: &Path) -> Option<Account> {
+    load_slot(root, SYNC)
+}
+
+fn load_slot(root: &Path, slot: &str) -> Option<Account> {
     let code = if use_keychain() {
         let o = std::process::Command::new("/usr/bin/security")
-            .args(["find-generic-password", "-s", "com.fengli.beayy", "-a", "sync", "-w"])
+            .args(["find-generic-password", "-s", "com.fengli.beayy", "-a", slot, "-w"])
             .output()
             .ok()?;
         if !o.status.success() {
@@ -149,31 +157,88 @@ pub fn load(root: &Path) -> Option<Account> {
         }
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     } else {
-        fs::read_to_string(account_file(root)).ok()?
+        fs::read_to_string(account_file(root, slot)).ok()?
     };
     Account::from_code(&code).ok()
 }
 
 fn save(root: &Path, a: &Account) -> Result<(), String> {
+    save_slot(root, SYNC, a)
+}
+
+fn save_slot(root: &Path, slot: &str, a: &Account) -> Result<(), String> {
     if use_keychain() {
         let ok = std::process::Command::new("/usr/bin/security")
-            .args(["add-generic-password", "-U", "-s", "com.fengli.beayy", "-a", "sync", "-w", &a.code()])
+            .args(["add-generic-password", "-U", "-s", "com.fengli.beayy", "-a", slot, "-w", &a.code()])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         return if ok { Ok(()) } else { Err("写入钥匙串失败".into()) };
     }
-    let f = account_file(root);
+    let f = account_file(root, slot);
     fs::create_dir_all(f.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&f, a.code()).map_err(|e| e.to_string())
 }
 
 /// 本机退出同步：忘掉账号（服务器上的数据不动）。同步进度留着，同一个账号再登录不用从头重传
 pub fn forget(root: &Path) {
+    forget_slot(root, SYNC)
+}
+
+fn forget_slot(root: &Path, slot: &str) {
     if use_keychain() {
-        let _ = std::process::Command::new("/usr/bin/security").args(["delete-generic-password", "-s", "com.fengli.beayy", "-a", "sync"]).output();
+        let _ = std::process::Command::new("/usr/bin/security").args(["delete-generic-password", "-s", "com.fengli.beayy", "-a", slot]).output();
     }
-    let _ = fs::remove_file(account_file(root));
+    let _ = fs::remove_file(account_file(root, slot));
+}
+
+/// 官方服务用的账号：同步用的是 Beayy 服务就是它，否则是单为官方服务登的（没有返回 None）
+pub fn service(root: &Path) -> Option<Account> {
+    load(root).filter(|a| a.mode() == "server").or_else(|| load_slot(root, SERVICE))
+}
+
+/// 同步用的是不是 Beayy 服务（官方或自建）：录音、转写这些块只走服务器
+pub fn server_mode(root: &Path) -> bool {
+    load(root).is_some_and(|a| a.mode() == "server")
+}
+
+/// 同步改用 Beayy 服务登录了：单为官方服务登的那个用不着了，服务器上注销、本机忘掉
+fn drop_service(root: &Path) {
+    if let Some(s) = load_slot(root, SERVICE) {
+        let _ = agent().delete(&format!("{}/v2/sessions/self", s.server)).header("Authorization", &s.auth()).call();
+        forget_slot(root, SERVICE);
+    }
+}
+
+/// 停掉 Beayy 服务同步但留着登录给官方服务用（换成 iCloud、网盘，或不同步）：账号挪到 service，令牌照旧有效
+pub fn keep_for_service(root: &Path) -> Result<(), String> {
+    let a = load(root).filter(|a| a.mode() == "server" && a.email.is_some()).ok_or("没用 Beayy 服务同步")?;
+    save_slot(root, SERVICE, &a)?;
+    forget(root);
+    Ok(())
+}
+
+/// 只为官方服务登录（同步不变）
+pub fn service_login(root: &Path, server: &str, email: &str, password: &str, device: &str, name: &str) -> Result<(), String> {
+    let a = login_account(server, email, password, device, name)?;
+    save_slot(root, SERVICE, &a)
+}
+
+/// 只为官方服务注册（同步不变），返回恢复码：以后换成 Beayy 服务同步用的也是这个账号
+pub fn service_signup(root: &Path, server: &str, invite: &str, email: &str, password: &str, device: &str, name: &str) -> Result<String, String> {
+    let a = signup_account(server, invite, email, password, device, name)?;
+    save_slot(root, SERVICE, &a)?;
+    Ok(recovery_code_of(&a.key))
+}
+
+/// 退出单为官方服务登的账号
+pub fn service_logout(root: &Path) {
+    drop_service(root);
+}
+
+/// 单为官方服务登的账号的邮箱（同步用 Beayy 服务时没有）
+pub fn service_email(root: &Path) -> Option<String> {
+    load_slot(root, SERVICE).and_then(|a| a.email)
 }
 
 /// 登录或注册之后：换了账号才清同步进度（上传记录、下载游标都是按账号的）；同一个账号只清掉「要重新登录」和上次的错
@@ -371,6 +436,14 @@ pub fn signup_info(server: &str) -> Value {
 
 /// 新账号：生成数据密钥，主密码包一层存上去；返回恢复码（只在这时给用户看一次，之后设置里也能再看）
 pub fn signup(root: &Path, server: &str, invite: &str, email: &str, password: &str, device: &str, name: &str) -> Result<String, String> {
+    let a = signup_account(server, invite, email, password, device, name)?;
+    save(root, &a)?;
+    reset_state_for(root, &a.user);
+    drop_service(root);
+    Ok(recovery_code_of(&a.key))
+}
+
+fn signup_account(server: &str, invite: &str, email: &str, password: &str, device: &str, name: &str) -> Result<Account, String> {
     let server = server.trim_end_matches('/');
     let mut key = [0u8; 32];
     getrandom::getrandom(&mut key).map_err(|e| e.to_string())?;
@@ -380,20 +453,25 @@ pub fn signup(root: &Path, server: &str, invite: &str, email: &str, password: &s
         "invite": invite, "email": email, "salt": salt, "auth": auth, "wrapped_key": wrap_key(&key, &wrap)?,
         "recovery": recovery_auth(&key), "device": device, "name": name,
     }))?;
-    let a = Account {
+    Ok(Account {
         server: server.into(),
         user: v["user"].as_str().ok_or("注册结果缺账号")?.into(),
         email: Some(email.trim().to_lowercase()),
         token: v["token"].as_str().ok_or("注册结果缺令牌")?.into(),
         key,
-    };
-    save(root, &a)?;
-    reset_state_for(root, &a.user);
-    Ok(recovery_code_of(&key))
+    })
 }
 
 /// 登录已有账号：取盐 → 派生 → 拿设备令牌和包好的数据密钥 → 本机解开
 pub fn login(root: &Path, server: &str, email: &str, password: &str, device: &str, name: &str) -> Result<(), String> {
+    let a = login_account(server, email, password, device, name)?;
+    save(root, &a)?;
+    reset_state_for(root, &a.user);
+    drop_service(root);
+    Ok(())
+}
+
+fn login_account(server: &str, email: &str, password: &str, device: &str, name: &str) -> Result<Account, String> {
     let server = server.trim_end_matches('/');
     let ag = agent();
     let email = email.trim().to_lowercase();
@@ -402,10 +480,7 @@ pub fn login(root: &Path, server: &str, email: &str, password: &str, device: &st
     let (auth, wrap) = derive(password, pre["salt"].as_str().unwrap_or(""))?;
     let v = post_json(&ag, &format!("{server}/v2/login"), None, &json!({"email": email, "auth": auth, "device": device, "name": name}))?;
     let key = unwrap_key(v["wrapped_key"].as_str().unwrap_or(""), &wrap)?;
-    let a = Account { server: server.into(), user: v["user"].as_str().unwrap_or("").into(), email: Some(email), token: v["token"].as_str().unwrap_or("").into(), key };
-    save(root, &a)?;
-    reset_state_for(root, &a.user);
-    Ok(())
+    Ok(Account { server: server.into(), user: v["user"].as_str().unwrap_or("").into(), email: Some(email), token: v["token"].as_str().unwrap_or("").into(), key })
 }
 
 /// v1 配对码账号设邮箱和主密码：同一把数据密钥包一层存上去，已上传的不用重传；这台设备换成自己的令牌。返回恢复码
@@ -434,6 +509,18 @@ pub fn recover(root: &Path, server: &str, email: &str, code: &str, new_password:
     login(root, server, email, new_password, device, name)
 }
 
+/// 单为官方服务登的账号忘了主密码：同 recover，重设后登进 service
+pub fn service_recover(root: &Path, server: &str, email: &str, code: &str, new_password: &str, device: &str, name: &str) -> Result<(), String> {
+    let server = server.trim_end_matches('/');
+    let key = parse_recovery(code)?;
+    let salt = new_salt()?;
+    let (auth, wrap) = derive(new_password, &salt)?;
+    post_json(&agent(), &format!("{server}/v2/recover"), None, &json!({
+        "email": email.trim().to_lowercase(), "recovery": recovery_auth(&key), "salt": salt, "auth": auth, "wrapped_key": wrap_key(&key, &wrap)?,
+    }))?;
+    service_login(root, server, email, new_password, device, name)
+}
+
 /// 改主密码（已登录）：数据密钥不变，重新包一层
 pub fn change_password(root: &Path, new_password: &str) -> Result<(), String> {
     let a = load(root).ok_or("没登录")?;
@@ -450,10 +537,27 @@ pub fn change_password(root: &Path, new_password: &str) -> Result<(), String> {
 pub fn account(root: &Path) -> Result<Value, String> {
     let a = load(root).ok_or("没登录")?;
     if a.remote().is_some() {
-        // 文件夹、iCloud、WebDAV 没有「登录着的设备」，列写过东西的设备；没有官方服务
+        // 文件夹、iCloud、WebDAV 没有「登录着的设备」，列写过东西的设备；官方服务和头像看单为官方服务登的账号
+        let s = load_slot(root, SERVICE).map(|s| server_account(&s));
+        let (services, profile) = match &s {
+            Some(Ok(v)) => (v["services"].clone(), v["profile"].clone()),
+            Some(Err(e)) => (json!({"plan": null, "error": e}), Value::Null),
+            None => (json!({"plan": null, "error": "没登录账号"}), Value::Null),
+        };
         return Ok(json!({"user": a.user, "email": null, "mode": a.mode(), "folder": a.folder().map(|d| d.display().to_string()), "webdav": a.webdav(),
-            "sessions": [], "devices": remote_devices(&a)?, "profile": null, "services": {"plan": null, "error": NO_SERVER}}));
+            "sessions": [], "devices": remote_devices(&a)?, "profile": profile, "services": services, "service_email": service_email(root)}));
     }
+    server_account(&a)
+}
+
+/// 不同步、只为官方服务登了账号：只有官方服务和头像
+pub fn service_account(root: &Path) -> Result<Value, String> {
+    let s = load_slot(root, SERVICE).ok_or("没登录账号")?;
+    let v = server_account(&s)?;
+    Ok(json!({"services": v["services"], "profile": v["profile"], "service_email": s.email}))
+}
+
+fn server_account(a: &Account) -> Result<Value, String> {
     let r = agent().get(&format!("{}/v2/account", a.server)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
     if !r.status().is_success() {
         return Err(err_of(r));
@@ -483,10 +587,8 @@ pub fn logout(root: &Path) {
 
 /// 存账号的显示名称和头像（data URL）；返回服务器记的更新时刻
 pub fn set_profile(root: &Path, name: &str, avatar: Option<&str>) -> Result<i64, String> {
-    let a = load(root).ok_or("没登录")?;
-    if a.remote().is_some() {
-        return Ok(0); // 文件夹、iCloud、WebDAV 模式不同步头像和名称，只存在本机
-    }
+    // 文件夹、iCloud、WebDAV 模式存到单为官方服务登的账号上；都没有就只存在本机
+    let Some(a) = service(root) else { return Ok(0) };
     let v = post_json(&agent(), &format!("{}/v2/profile", a.server), Some(&a.auth()), &json!({"name": name, "avatar": avatar}))?;
     Ok(v["updated"].as_i64().unwrap_or(0))
 }
@@ -1204,6 +1306,7 @@ pub fn status(root: &Path) -> Value {
         "last_error": s.raw.get("last_error"),
         "uploaded": s.up.len(),
         "need_login": s.raw.get("need_login").and_then(Value::as_bool).unwrap_or(false),
+        "service_email": service_email(root),
         "remote_devices": remote_set(root),
         "progress": progress(),
     })
@@ -1332,6 +1435,16 @@ fn sync_round(root: &Path, local_device: &str, upload: bool) -> Option<Report> {
     let mut errors = vec![];
 
     // 1. 上传：本机设备＋本机读到的 iPhone（同步来的不传）
+    // 官方服务只传本机电脑分段的精简版（见 lean）；头一回切到精简时，已传的完整版按精简版重传一遍，腾出空间
+    let lean = lean(&a);
+    if lean && st.raw.get("lean") != Some(&json!(true)) {
+        let pre = format!("{local_device}/");
+        st.up.retain(|k, _| !k.strip_prefix(&pre).map(|n| !n.contains('.')).unwrap_or(false));
+        st.raw.insert("lean".into(), json!(true));
+    } else if !lean {
+        st.raw.remove("lean");
+    }
+    let mut slim: HashSet<String> = HashSet::new();
     let mut todo: Vec<(String, String, PathBuf, (u64, u64))> = vec![];
     let devs = fs::read_dir(root.join("devices")).map(|r| r.filter_map(|e| e.ok()).collect::<Vec<_>>()).unwrap_or_default();
     for dev in devs {
@@ -1351,6 +1464,9 @@ fn sync_round(root: &Path, local_device: &str, upload: bool) -> Option<Report> {
             let mtime = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
             let sig = (meta.len(), mtime);
             if st.up.get(&format!("{d}/{name}")) != Some(&sig) {
+                if lean && d == local_device {
+                    slim.insert(format!("{d}/{name}"));
+                }
                 todo.push((d.clone(), name, f, sig));
             }
         }
@@ -1403,13 +1519,16 @@ fn sync_round(root: &Path, local_device: &str, upload: bool) -> Option<Report> {
             let hs: Vec<_> = chunks
                 .into_iter()
                 .map(|chunk| {
-                    let (a, ag, stop) = (&a, &ag, &stop);
+                    let (a, ag, stop, slim) = (&a, &ag, &stop, &slim);
                     s.spawn(move || {
                         chunk
                             .into_iter()
                             .map(|(d, n, f, sig)| {
                                 let r = (|| {
-                                    let plain = fs::read(f).map_err(|e| e.to_string())?;
+                                    let mut plain = fs::read(f).map_err(|e| e.to_string())?;
+                                    if slim.contains(&format!("{d}/{n}")) {
+                                        plain = lean_segment(&plain);
+                                    }
                                     let blob = seal(a, d, n, &plain)?;
                                     if let Some(store) = store {
                                         // WebDAV 限流、连不上：这一轮剩下的不传了，下一轮接着传
@@ -1558,6 +1677,33 @@ fn sync_round(root: &Path, local_device: &str, upload: bool) -> Option<Report> {
     Some(finish(root, st, uploaded, downloaded, errors))
 }
 
+/// 连的是官方服务：电脑分段传精简版。屏幕文字（`ui.text` 的 text）占分段九成，只有本机写摘要用得着，
+/// 别的设备看时间线、时长只要其余字段；同步文件夹、iCloud、网盘、自己部署的服务端照旧传完整的
+fn lean(a: &Account) -> bool {
+    a.remote().is_none() && a.server.trim_end_matches('/') == DEFAULT_SERVER
+}
+
+/// 分段去掉屏幕文字：`ui.text` 事件留着（时刻、app、窗口、网址），只删 text；别的行原样
+fn lean_segment(plain: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(plain.len() / 4);
+    for line in plain.split_inclusive(|b| *b == b'\n') {
+        let slim = (|| {
+            if !line.windows(9).any(|w| w == b"\"ui.text\"") {
+                return None;
+            }
+            let mut v: Map<String, Value> = serde_json::from_slice(line).ok()?;
+            if v.get("event_type").and_then(Value::as_str) != Some("ui.text") || v.remove("text").is_none() {
+                return None;
+            }
+            let mut b = serde_json::to_vec(&v).ok()?;
+            b.push(b'\n');
+            Some(b)
+        })();
+        out.extend(slim.as_deref().unwrap_or(line));
+    }
+    out
+}
+
 // ---------- 录音、转写、停留点、配置这些块（方案见 报告/方案_20261021_录音与存储.md）：普通同步跳过，由 beayy-remote 单独处理 ----------
 
 /// 不是分段、摘要、改名表的块：录音 audio.、转写 transcript.、停留点 places.、苹果健康 health.，以及 account 设备下的配置和声纹
@@ -1677,12 +1823,12 @@ pub fn usage(root: &Path) -> Result<Value, String> {
 
 /// 官方服务（模型、地图）用的：同步服务器地址和这台设备的认证头。没登录返回 None；令牌只在 Rust 里用，不给网页
 pub fn official_auth(root: &Path) -> Option<(String, String)> {
-    load(root).filter(|a| a.mode() == "server").map(|a| (a.server.clone(), a.auth()))
+    service(root).map(|a| (a.server.clone(), a.auth()))
 }
 
 /// 官方模型的代理地址和认证头（同步服务 /v2/llm/chat/completions，按账号开通）。没登录返回 None；令牌只在 Rust 里用，不给网页
 pub fn official_llm(root: &Path) -> Option<(String, String)> {
-    load(root).filter(|a| a.mode() == "server").map(|a| (format!("{}/v2/llm/chat/completions", a.server), a.auth()))
+    service(root).map(|a| (format!("{}/v2/llm/chat/completions", a.server), a.auth()))
 }
 
 /// 转写票据（1 小时有效）：(票据, 到期毫秒)
@@ -1692,10 +1838,7 @@ pub fn ticket(root: &Path) -> Result<(String, i64), String> {
 
 /// 官方服务的票据（1 小时有效）：kind＝asr（转写）或 map（地图），同步服务按那一项的开通和额度发
 pub fn ticket_for(root: &Path, kind: &str) -> Result<(String, i64), String> {
-    let a = logged_in(root)?;
-    if a.remote().is_some() {
-        return Err(NO_SERVER.into());
-    }
+    let a = service(root).ok_or("没登录账号")?;
     let mut r = agent().get(&format!("{}/v2/ticket?for={kind}", a.server)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
     if !r.status().is_success() {
         return Err(err_of(r));
@@ -1902,6 +2045,50 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
     }
 
+    /// 同步用文件夹（iCloud、网盘同理）时单为官方服务登账号；要一台开放注册的服务端：
+    ///   cd app/server && BEAYY_OPEN_SIGNUP=1 BEAYY_NEW_USER_LLM_TOKENS=50000 uvicorn server:app --port 8770（在空目录里跑，数据写进当前目录）
+    ///   BEAYY_TEST_SERVER=http://127.0.0.1:8770 cargo test -p beayy-sync service_roundtrip -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn service_roundtrip() {
+        let server = std::env::var("BEAYY_TEST_SERVER").expect("要设 BEAYY_TEST_SERVER");
+        let base = std::env::temp_dir().join(format!("beayy-service-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("a");
+        std::env::set_var("BEAYY_DATA_ROOT", &root); // 账号存文件，不碰钥匙串
+        let email = format!("svc-{}@example.com", std::process::id());
+        folder_create(&root, base.join("vault").to_str().unwrap(), "password-1").unwrap();
+        assert!(official_llm(&root).is_none() && ticket(&root).is_err() && service_email(&root).is_none());
+        // 只为官方服务注册：同步还是文件夹，官方模型、票据、头像走这个账号
+        service_signup(&root, &server, "", &email, "password-1", "mac-a", "Mac · a").unwrap();
+        assert_eq!(load(&root).unwrap().mode(), "folder");
+        assert_eq!(service_email(&root).as_deref(), Some(email.as_str()));
+        assert_eq!(status(&root)["service_email"], json!(email));
+        assert!(official_llm(&root).unwrap().0.starts_with(&server));
+        let acc = account(&root).unwrap();
+        assert_eq!((acc["mode"].as_str(), acc["services"]["plan"].as_str()), (Some("folder"), Some("official")), "{acc}");
+        assert!(set_profile(&root, "测试", None).unwrap() > 0);
+        // 退出文件夹同步：官方服务照常
+        logout(&root);
+        assert!(load(&root).is_none() && official_llm(&root).is_some());
+        assert_eq!(service_account(&root).unwrap()["services"]["plan"], json!("official"));
+        service_logout(&root);
+        assert!(official_llm(&root).is_none());
+        // 换成服务器同步：登录后 service 那个注销；停掉服务器同步时登录挪回 service，令牌照旧能用
+        service_login(&root, &server, &email, "password-1", "mac-a", "Mac · a").unwrap();
+        login(&root, &server, &email, "password-1", "mac-a", "Mac · a").unwrap();
+        assert!(service_email(&root).is_none() && server_mode(&root));
+        keep_for_service(&root).unwrap();
+        assert!(load(&root).is_none() && !server_mode(&root));
+        assert_eq!(service_account(&root).unwrap()["services"]["plan"], json!("official"));
+        // 新账号没开转写：服务器回「没开通」，不是本机说没登录
+        let e = ticket_for(&root, "asr").unwrap_err();
+        assert!(!e.contains("没登录"), "{e}");
+        service_logout(&root);
+        assert!(service_account(&root).is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn daily_names() {
         assert_eq!(daily_block("日总结_20261028.md").as_deref(), Some("daily.d.20261028.md"));
@@ -1911,6 +2098,15 @@ mod tests {
         assert_eq!(daily_file("daily.w.20261026.md").as_deref(), Some("周总结_20261026.md"));
         assert_eq!(daily_file("daily.x.2026.md"), None);
         assert!(safe_name(&daily_block("周总结_20261026.md").unwrap()));
+    }
+
+    #[test]
+    fn lean_drops_screen_text() {
+        let seg = b"{\"event_type\":\"ui.text\",\"app_name\":\"A\",\"text\":\"secret\"}\n{\"event_type\":\"mouse.click\",\"text\":\"ok\"}\nnot json\n";
+        let out = String::from_utf8(lean_segment(seg)).unwrap();
+        assert!(!out.contains("secret") && out.contains("\"app_name\":\"A\""), "{out}");
+        assert!(out.contains("\"text\":\"ok\"") && out.ends_with("not json\n"), "{out}");
+        assert_eq!(out.lines().count(), 3);
     }
 
     #[test]

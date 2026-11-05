@@ -36,25 +36,26 @@ struct ServiceError: LocalizedError {
     init(_ message: String, status: Int = 0) { self.message = message; self.status = status }
 }
 
-/// 请求出错写成人话：错在哪、会不会自己好。upload 为真时说会自动重传
+/// 请求出错写成人话：错在哪、会不会自己好。upload 为真时说会自动重传。
+/// service 是中文服务名（「同步服务」「转写服务」「WebDAV」），下面拿它比对，显示时才 tr
 func netErrorText(_ error: Error?, status: Int, service: String = "同步服务", upload: Bool = false) -> String {
-    let later = upload ? "，稍后自动重传" : "，稍后再试"
+    let v = ["service": tr(service), "later": upload ? tr("，稍后自动重传") : tr("，稍后再试")]
     if let e = error as? URLError {
         switch e.code {
-        case .notConnectedToInternet, .networkConnectionLost: return upload ? "没有网络，连上后自动重传" : "没有网络"
-        case .timedOut, .cannotConnectToHost, .cannotFindHost: return "连不上\(service)\(later)"
-        default: return "\(service)没连上（\(e.code.rawValue)）\(later)"
+        case .notConnectedToInternet, .networkConnectionLost: return upload ? tr("没有网络，连上后自动重传") : tr("没有网络")
+        case .timedOut, .cannotConnectToHost, .cannotFindHost: return tr("连不上{service}{later}", v)
+        default: return tr("{service}没连上（{code}）{later}", v.merging(["code": "\(e.code.rawValue)"]) { a, _ in a })
         }
     }
-    if error != nil { return "\(service)没连上\(later)" }
+    if error != nil { return tr("{service}没连上{later}", v) }
     switch status {
     case 401, 403:
-        if service == "WebDAV" { return "WebDAV 不认用户名或密码（改过密码？）：到「我」退出再登录，不会自己好" }
-        return service == "同步服务" ? "同步服务不认这台手机的登录（在别处移除了，或改过主密码）：到「我」退出再登录，不会自己好"
-            : "\(service)不认这台手机的票据\(later)"
-    case 400: return "\(service)说数据格式不对，这一条不会自己好，告诉凤梨"
-    case 413: return "这一块太大，\(service)不收，不会自己好，告诉凤梨"
-    default: return "\(service)出错（\(status)）\(later)"
+        if service == "WebDAV" { return tr("WebDAV 不认用户名或密码（改过密码？）：到「我」退出再登录，不会自己好") }
+        return service == "同步服务" ? tr("同步服务不认这台手机的登录（在别处移除了，或改过主密码）：到「我」退出再登录，不会自己好")
+            : tr("{service}不认这台手机的票据{later}", v)
+    case 400: return tr("{service}说数据格式不对，这一条不会自己好，告诉凤梨", v)
+    case 413: return tr("这一块太大，{service}不收，不会自己好，告诉凤梨", v)
+    default: return tr("{service}出错（{status}）{later}", v.merging(["status": "\(status)"]) { a, _ in a })
     }
 }
 
@@ -232,7 +233,7 @@ final class Account: ObservableObject {
     /// 同 send，另外收下 accept 里的状态（转写服务算得慢时回 202），返回 body 和状态
     static func call(_ r: URLRequest, service: String = "同步服务", accept: Set<Int> = [200]) async throws -> (Data, Int) {
         #if targetEnvironment(simulator)
-        throw ServiceError("模拟器不连服务器")
+        throw ServiceError(tr("模拟器不连服务器"))
         #else
         let data: Data, resp: URLResponse
         do {
@@ -245,7 +246,7 @@ final class Account: ObservableObject {
             // 两个服务出错时都带一句中文（同步服务 {"error"}，转写服务 {"detail"}），有就用它
             let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let said = (o?["error"] as? String) ?? (o?["detail"] as? String)
-            throw ServiceError(said.map { "\(service)：\($0)" } ?? netErrorText(nil, status: status, service: service), status: status)
+            throw ServiceError(said.map { tr("{service}：{msg}", ["service": tr(service), "msg": $0]) } ?? netErrorText(nil, status: status, service: service), status: status)
         }
         return (data, status)
         #endif
@@ -255,7 +256,7 @@ final class Account: ObservableObject {
 
     /// 取一块并解开；没有抛 status 404
     func get(device: String, name: String) async throws -> Data {
-        guard let c = credentials else { throw ServiceError("没登录账号") }
+        guard let c = credentials else { throw ServiceError(tr("没登录账号")) }
         let blob: Data
         switch c.kind {
         case .server: blob = try await Self.send(c.request("v1/blob/\(device)/\(name)"))
@@ -267,7 +268,7 @@ final class Account: ObservableObject {
 
     /// 封好传一块（小的，前台传；录音和停留点走 Uploader 的后台上传）
     func put(device: String, name: String, plain: Data) async throws {
-        guard let c = credentials else { throw ServiceError("没登录账号") }
+        guard let c = credentials else { throw ServiceError(tr("没登录账号")) }
         let sealed = try SyncCrypto.seal(key: c.key, device: device, name: name, plain: plain)
         switch c.kind {
         case .server:
@@ -287,12 +288,12 @@ final class Account: ObservableObject {
     }
 
     /// 同 Rust 的 NO_SERVER
-    static let noServer = "用的是 iCloud 或 WebDAV，没有服务器：转写、官方地图要换成服务器同步"
+    static var noServer: String { tr("用的是 iCloud 或 WebDAV，没有服务器：转写、官方地图要换成服务器同步") }
 
     /// 转写服务的票据（1 小时有效）：转写服务不拿同步令牌
     /// 官方服务的票据：kind＝asr（转写）或 map（地图），同步服务按那一项的开通和额度发
     func ticket(_ kind: String = "asr") async throws -> String {
-        guard let c = credentials else { throw ServiceError("没登录账号") }
+        guard let c = credentials else { throw ServiceError(tr("没登录账号")) }
         guard c.isServer else { throw ServiceError(Self.noServer) }
         // 一小时有效：快到期（5 分钟内）再取新的
         if let (t, exp) = lock.withLock({ tickets[kind] }), exp.timeIntervalSinceNow > 300 { return t }
@@ -304,7 +305,7 @@ final class Account: ObservableObject {
             return t
         }
         let s = String(decoding: d, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !s.isEmpty, !s.hasPrefix("{") else { throw ServiceError("同步服务没给转写票据") }
+        guard !s.isEmpty, !s.hasPrefix("{") else { throw ServiceError(tr("同步服务没给转写票据")) }
         return s
     }
 
@@ -322,8 +323,8 @@ final class Account: ObservableObject {
     func login(email rawEmail: String, password: String, server rawServer: String) async throws {
         let server = Self.normalize(rawServer)
         let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !email.isEmpty, !password.isEmpty else { throw ServiceError("邮箱和主密码都要填") }
-        guard let base = URL(string: server), base.host != nil else { throw ServiceError("服务器地址不对") }
+        guard !email.isEmpty, !password.isEmpty else { throw ServiceError(tr("邮箱和主密码都要填")) }
+        guard let base = URL(string: server), base.host != nil else { throw ServiceError(tr("服务器地址不对")) }
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-_.~")
         let q = email.addingPercentEncoding(withAllowedCharacters: allowed) ?? email
@@ -337,7 +338,7 @@ final class Account: ObservableObject {
         let name = await MainActor.run { UIDevice.current.name }
         r.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "auth": auth, "device": Config.device, "name": name])
         let v = Self.json(try await Self.send(r))
-        guard let user = v["user"] as? String, let token = v["token"] as? String else { throw ServiceError("同步服务的登录结果缺账号或令牌") }
+        guard let user = v["user"] as? String, let token = v["token"] as? String else { throw ServiceError(tr("同步服务的登录结果缺账号或令牌")) }
         let key = try SyncCrypto.unwrapKey(v["wrapped_key"] as? String ?? "", wrap: wrap)
         Keychain.set("user", Data(user.utf8))
         Keychain.set("token", Data(token.utf8))
@@ -405,7 +406,7 @@ final class Account: ObservableObject {
                 self.configError = nil
             }
         } catch {
-            let msg = error is DecodingError ? "电脑推来的配置看不懂，告诉凤梨" : error.localizedDescription
+            let msg = error is DecodingError ? tr("电脑推来的配置看不懂，告诉凤梨") : error.localizedDescription
             await MainActor.run { self.configError = msg }
         }
     }

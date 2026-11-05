@@ -32,6 +32,6 @@ final class LiveLocation: NSObject, ObservableObject, CLLocationManagerDelegate 
     }
 
     func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
-        DispatchQueue.main.async { self.error = "取不到位置：\(error.localizedDescription)" }
+        DispatchQueue.main.async { self.error = tr("取不到位置：{e}", ["e": error.localizedDescription]) }
     }
 }

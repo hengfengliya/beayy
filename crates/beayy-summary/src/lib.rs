@@ -3,7 +3,7 @@
 //!
 //! 输入：`<数据根>/devices/mac-*/segments/<UTC 整 10 分>/events.jsonl`（格式见 app/README.md；多台 Mac 同段合并）
 //! 输出：`<数据根>/summaries/YYYY-MM-DDTHH-MM-SS-xxxx-10min-memory-summary.md`（UTC）
-//! 摘要间隔（settings.json 的 summary_minutes：10／20／30／60，默认 10）调长后，一份摘要管几个分段，
+//! 摘要间隔（settings.json 的 summary_minutes：10／20／30／60；没设过的，官方模型 60、自己的模型 10）调长后，一份摘要管几个分段，
 //! 文件名里写它管多长（-30min-），读的一方按文件名算止时刻；采集的分段照旧是 10 分钟。
 //!
 //! 每个已结束、还没写过摘要的分段：
@@ -774,9 +774,13 @@ impl Summarizer {
         fs::read_to_string(self.root.join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
     }
 
-    /// 用官方模型（settings.json 的 model_mode＝official）：经同步服务代调，按账号开通，不用自己的密钥
-    fn official(&self) -> bool {
-        self.raw_settings().get("model_mode").and_then(Value::as_str) == Some("official")
+    /// 用官方模型（settings.json 的 model_mode＝official）：经同步服务代调，按账号开通，不用自己的密钥。
+    /// 没选过的，没有密钥就算官方（和设置页显示的一样）
+    pub fn official(&self) -> bool {
+        match self.raw_settings().get("model_mode").and_then(Value::as_str) {
+            Some(m) => m == "official",
+            None => api_key_source().is_none(),
+        }
     }
 
     fn call_model(&self, pack: &str, prior: &str, known: &[String], mins: i64) -> Result<(Map<String, Value>, Value), String> {
@@ -829,7 +833,7 @@ impl Summarizer {
         let (gateway, model) = self.settings();
         // 官方：地址是同步服务的代理，认证用账号令牌（模型由服务器定）；自己的网关：地址、模型、密钥都用设置里的
         let (url, auth) = if self.official() {
-            beayy_sync::official_llm(&beayy_core::data_root()).ok_or("用官方模型要先登录账号：设置 → 账号")?
+            beayy_sync::official_llm(&beayy_core::data_root()).ok_or("用官方模型要先登录 Beayy 账号：设置 → AI → 模型")?
         } else {
             if model.is_empty() {
                 return Err("还没设模型：到设置 → 连接 → 模型 里填".into());
@@ -915,9 +919,9 @@ impl Summarizer {
             .collect()
     }
 
-    /// 摘要间隔（分钟）：settings.json 的 summary_minutes，只认 EVERY 里的，默认 10
+    /// 摘要间隔（分钟）：settings.json 的 summary_minutes，只认 EVERY 里的；没设过的，官方模型 60（按账号的额度省着用），自己的模型 10
     pub fn every(&self) -> i64 {
-        self.raw_settings().get("summary_minutes").and_then(Value::as_i64).filter(|m| EVERY.contains(m)).unwrap_or(10)
+        self.raw_settings().get("summary_minutes").and_then(Value::as_i64).filter(|m| EVERY.contains(m)).unwrap_or(if self.official() { 60 } else { 10 })
     }
 
     fn prior_summary(&self, name: &str, names: &[String]) -> String {

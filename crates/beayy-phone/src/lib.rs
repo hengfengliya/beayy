@@ -3,6 +3,7 @@
 //! 需要「完全磁盘访问」。从 Swift 版 PhoneSync.swift 移植，解析规则同 脚本/日数据包.py 的 phone_events：
 //! 每条记录里有 `10 01 18 <1 开始/0 结束> 21 <8 字节小端 double，Core Data 时间> 32 <长度> <bundle id>`。
 
+use beayy_core::i18n::{tr, tr_with};
 use beayy_core::{fields, iso, EventLog};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -106,7 +107,7 @@ impl PhoneSync {
     pub fn sync(&mut self, root: &Path) -> Vec<SyncNote> {
         let mut notes = Vec::new();
         let Ok(dirs) = fs::read_dir(remote_root()) else {
-            self.last_summary = "缺完全磁盘访问".into();
+            self.last_summary = tr("缺完全磁盘访问");
             return notes;
         };
         for dir in dirs.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()) {
@@ -159,9 +160,9 @@ impl PhoneSync {
             notes.push(SyncNote { device, uuid, added, total: records.len(), latest });
         }
         self.last_summary = if notes.is_empty() {
-            "没有找到 iPhone 同步目录".into()
+            tr("没有找到 iPhone 同步目录")
         } else {
-            notes.iter().map(|n| format!("{} 新增 {} 条，同步截至 {}", n.device, n.added, n.latest)).collect::<Vec<_>>().join("；")
+            notes.iter().map(|n| tr_with("{device} 新增 {n} 条，同步截至 {latest}", &[("device", &n.device), ("n", &n.added.to_string()), ("latest", &n.latest)])).collect::<Vec<_>>().join(&tr("；"))
         };
         notes
     }

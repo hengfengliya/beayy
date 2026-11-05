@@ -66,11 +66,11 @@ final class Places: NSObject, ObservableObject, CLLocationManagerDelegate {
     var ready: Bool { auth == .authorizedAlways && precise }
     var authText: String {
         switch auth {
-        case .authorizedAlways: return "始终允许"
-        case .authorizedWhenInUse: return "使用期间（要改成始终）"
-        case .denied: return "不允许"
-        case .restricted: return "受限"
-        default: return "还没问"
+        case .authorizedAlways: return tr("始终允许")
+        case .authorizedWhenInUse: return tr("使用期间（要改成始终）")
+        case .denied: return tr("不允许")
+        case .restricted: return tr("受限")
+        default: return tr("还没问")
         }
     }
 

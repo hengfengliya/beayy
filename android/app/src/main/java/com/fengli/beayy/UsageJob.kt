@@ -10,6 +10,7 @@ import android.content.Context
 /** 每 15 分钟（系统允许的最短间隔）在后台读一轮使用记录并上传；有网才跑，重启后接着排 */
 class UsageJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
+        I18n.init(this)
         Thread {
             Usage.read(applicationContext)
             jobFinished(params, false)

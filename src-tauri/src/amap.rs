@@ -30,7 +30,7 @@ pub fn official() -> bool {
 
 /// 官方：同步服务器地址和认证头
 fn official_auth() -> Result<(String, String), String> {
-    beayy_sync::official_auth(&beayy_core::data_root()).ok_or_else(|| "用官方地图要先登录账号：设置 → 账号".to_string())
+    beayy_sync::official_auth(&beayy_core::data_root()).ok_or_else(|| "用官方地图要先登录 Beayy 账号：设置 → 手机与手表 → 地图".to_string())
 }
 
 /// 地图票据：快到期（5 分钟内）再取新的
@@ -43,7 +43,7 @@ fn map_ticket() -> Result<String, String> {
             return Ok(t);
         }
     }
-    let got = beayy_sync::ticket_for(&beayy_core::data_root(), "map").map_err(|e| if e.contains("没登录") { "用官方地图要先登录账号：设置 → 账号".to_string() } else { e })?;
+    let got = beayy_sync::ticket_for(&beayy_core::data_root(), "map").map_err(|e| if e.contains("没登录") { "用官方地图要先登录 Beayy 账号：设置 → 手机与手表 → 地图".to_string() } else { e })?;
     *MAP_TICKET.lock().unwrap() = Some(got.clone());
     Ok(got.0)
 }

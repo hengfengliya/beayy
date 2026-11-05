@@ -16,7 +16,7 @@ final class VoiceprintRecorder: NSObject, ObservableObject {
     func start() {
         AVAudioApplication.requestRecordPermission { granted in
             DispatchQueue.main.async {
-                guard granted else { self.phase = .failed("没有麦克风权限，到「设置 › Beayy」打开"); return }
+                guard granted else { self.phase = .failed(tr("没有麦克风权限，到「设置 › Beayy」打开")); return }
                 do {
                     let s = AVAudioSession.sharedInstance()
                     try s.setCategory(.record, mode: .measurement)
@@ -32,7 +32,7 @@ final class VoiceprintRecorder: NSObject, ObservableObject {
                         if r.isRecording { self.elapsed = r.currentTime } else { self.finish() }
                     }
                 } catch {
-                    self.phase = .failed("录音失败：\(error.localizedDescription)")
+                    self.phase = .failed(tr("录音失败：{e}", ["e": error.localizedDescription]))
                 }
             }
         }
@@ -76,14 +76,14 @@ final class VoiceprintRecorder: NSObject, ObservableObject {
         let (d, status) = try await Account.call(r, service: "转写服务", accept: [200, 202])
         var result = object(d)
         if status == 202 {
-            guard let job = result["job"] as? String, !job.isEmpty else { throw ServiceError("转写服务没给任务号，重录一次试试") }
+            guard let job = result["job"] as? String, !job.isEmpty else { throw ServiceError(tr("转写服务没给任务号，重录一次试试")) }
             let deadline = Date().addingTimeInterval(10 * 60)
             while true {
-                guard Date() < deadline else { throw ServiceError("转写服务 10 分钟还没算完，可能在排队转写，过一会儿重录") }
+                guard Date() < deadline else { throw ServiceError(tr("转写服务 10 分钟还没算完，可能在排队转写，过一会儿重录")) }
                 try await Task.sleep(nanoseconds: 3_000_000_000)
                 let o = object(try await Account.send(request("v2/jobs/\(job)"), service: "转写服务"))
                 let s = o["status"] as? String
-                if s == "failed" { throw ServiceError("转写服务：\(o["error"] as? String ?? "没算出声纹")") }
+                if s == "failed" { throw ServiceError(tr("转写服务：{msg}", ["msg": o["error"] as? String ?? tr("没算出声纹")])) }
                 if s == "done" {
                     result = o["result"] as? [String: Any] ?? [:]
                     _ = try? await Account.send(request("v2/jobs/\(job)", method: "DELETE"), service: "转写服务")
@@ -92,7 +92,7 @@ final class VoiceprintRecorder: NSObject, ObservableObject {
             }
         }
         guard let embedding = result["embedding"] as? String, !embedding.isEmpty else {
-            throw ServiceError("转写服务没算出声纹，重录一次试试")
+            throw ServiceError(tr("转写服务没算出声纹，重录一次试试"))
         }
         let speech = (result["speech_sec"] as? NSNumber)?.doubleValue ?? 0
         let plain = try JSONSerialization.data(withJSONObject: ["v": 1, "embedding": embedding, "speech_sec": speech,
@@ -112,32 +112,32 @@ struct VoiceprintView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 20) {
-                Text("用平时说话的音量，把下面这段念完（约 30 秒）。安静的地方效果最好。")
+                Text(tr("用平时说话的音量，把下面这段念完（约 30 秒）。安静的地方效果最好。"))
                     .foregroundStyle(.secondary)
-                Text(script).font(.title3).lineSpacing(6)
+                Text(tr(script)).font(.title3).lineSpacing(6)
                 Spacer()
                 switch rec.phase {
                 case .idle:
-                    Button("开始录") { rec.start() }.buttonStyle(.borderedProminent).tint(.primary)
+                    Button(tr("开始录")) { rec.start() }.buttonStyle(.borderedProminent).tint(.primary)
                 case .recording:
                     HStack {
                         ProgressView(value: min(rec.elapsed, rec.length), total: rec.length)
-                        Button("念完了") { rec.finish() }.buttonStyle(.bordered)
+                        Button(tr("念完了")) { rec.finish() }.buttonStyle(.bordered)
                     }
                 case .uploading:
-                    ProgressView("上传中…")
+                    ProgressView(tr("上传中…"))
                 case .done:
-                    Text("已存到账号，电脑下一轮转写（10 分钟内）生效。").foregroundStyle(.green)
-                    Button("完成") { dismiss() }.buttonStyle(.borderedProminent).tint(.primary)
+                    Text(tr("已存到账号，电脑下一轮转写（10 分钟内）生效。")).foregroundStyle(.green)
+                    Button(tr("完成")) { dismiss() }.buttonStyle(.borderedProminent).tint(.primary)
                 case .failed(let m):
                     Text(m).foregroundStyle(.red)
-                    Button("重录") { rec.start() }.buttonStyle(.bordered)
+                    Button(tr("重录")) { rec.start() }.buttonStyle(.bordered)
                 }
             }
             .padding()
-            .navigationTitle("录声纹")
+            .navigationTitle(tr("录声纹"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(tr("取消")) { dismiss() } } }
         }
     }
 }

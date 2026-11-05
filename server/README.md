@@ -75,6 +75,7 @@ docker compose --profile tunnel up -d
 | `BEAYY_USER_QUOTA_MB` | 每个账号最多存多少 MB（默认 0＝不限）。单个账号另设：`python admin.py storage <邮箱> <MB>`（0＝不限） |
 | `BEAYY_MAX_USERS` | 最多开放多少个账号（默认 0＝不限），满了停止注册 |
 | `BEAYY_NEW_USER_LLM_TOKENS` | 新注册的账号自动开通官方模型，每月这么多 token（默认 0＝不自动开通，用 `admin.py open`）；转写、地图不跟着开 |
+| `BEAYY_NEW_USER_TRIAL_DAYS` | 自动开通的新账号试用几天（默认 0＝不限期）；到期后官方服务停用，要在设置里改用自己的模型；`admin.py trial` 单独延长 |
 | `BEAYY_MIN_FREE_GB` | 硬盘剩余低于这么多 GB 停止注册（默认 20），低到一半连上传也停 |
 | `BEAYY_SIGNUP_PER_IP`、`BEAYY_SIGNUP_PER_DAY` | 同一 IP 每天最多注册几个（默认 3）、每天一共最多几个（默认 50） |
 | `BEAYY_TICKET_SECRET` | 转写、地图票据的签名密钥。不填自动生成，存在 `data/sync/ticket_secret` |

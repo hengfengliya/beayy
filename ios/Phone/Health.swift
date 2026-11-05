@@ -91,7 +91,7 @@ final class Health: ObservableObject {
             UserDefaults.standard.set(true, forKey: "healthAsked")
             start()
         } catch {
-            await setError("授权没成功：\(error.localizedDescription)")
+            await setError(tr("授权没成功：{e}", ["e": error.localizedDescription]))
         }
     }
 
@@ -161,7 +161,7 @@ final class Health: ObservableObject {
             do {
                 try await readType(t, units: units)
             } catch let e as HKError where e.code == .errorDatabaseInaccessible {
-                err = "手机锁着时读不了健康数据，解锁后接着读"
+                err = tr("手机锁着时读不了健康数据，解锁后接着读")
                 break
             } catch let e as HKError where e.code == .errorAuthorizationNotDetermined || e.code == .errorAuthorizationDenied {
                 continue  // 这种类型没给读（或授权弹窗里没有它）：跳过，不算错
@@ -172,7 +172,7 @@ final class Health: ObservableObject {
         do {
             try await hourly()
         } catch {
-            err = err ?? "每小时合计：\(error.localizedDescription)"
+            err = err ?? tr("每小时合计：{e}", ["e": error.localizedDescription])
         }
         let now = Date(), msg = err
         UserDefaults.standard.set(now, forKey: "healthLastRun")
@@ -522,7 +522,7 @@ extension Health {
             start()
             kick(nil)
         } catch {
-            await setError("造演示数据没成功：\(error.localizedDescription)")
+            await setError(tr("造演示数据没成功：{e}", ["e": error.localizedDescription]))
         }
     }
 }

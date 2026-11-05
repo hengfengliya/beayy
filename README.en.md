@@ -27,7 +27,7 @@ A summary every 10 minutes, a journal every evening, rolled up into weekly and m
 
 At the end of a busy day it's hard to remember what you actually did. Screen Time tells you that you spent three hours in Chrome, not what you were doing in it. Beayy runs in the background on your computer, phone and watch, and has a language model write the log for you. You just read it.
 
-The interface comes in English and Simplified Chinese (Settings → General → Language; it follows your system by default). Summaries and journals are still written in Chinese for now. The screenshots below use made-up sample data.
+The interface comes in English and Simplified Chinese (Settings → General → Language; it follows your system by default). Summaries and journals follow the interface language, or set it under Settings → AI → Language. The screenshots below use made-up sample data.
 
 ## The shape of your day
 
@@ -91,8 +91,8 @@ Either way, records are compressed and encrypted on your device before they leav
 | Health (optional) | The iPhone app reads Apple Health (sleep, steps, activity, workouts, heart rate, mood and more) read-only, and syncs it to your computer encrypted. The Today view shows last night's sleep and the day's activity; the journal leaves out details like heart rate and mood |
 | Watch (optional) | All-day Apple Watch audio, sent to a transcription service (the official one or your own) that transcribes it and separates speakers. Your computer only gets the text: who said what, and when |
 | Storage | All local, in `~/Library/Application Support/Beayy/`, one append-only file per device per 10 minutes |
-| Summaries | Each 10-minute record goes to **the model you configure** (any OpenAI-compatible API, or the official server) and the result is written back locally. Settings → AI → Model → Usage shows the tokens spent per day |
-| Sync (optional) | Compressed and encrypted with XChaCha20-Poly1305 on your device. Your master password never leaves the device (key derived with Argon2id); the server stores only ciphertext and a hash of the login verifier |
+| Summaries | Each 10-minute record goes to **the model you configure** (any OpenAI-compatible API, or the official server) and the result is written back locally. The interval can be 10, 20, 30 or 60 minutes; with the official model it defaults to 60. Settings → AI → Model → Usage shows the tokens spent per day |
+| Sync (optional) | Compressed and encrypted with XChaCha20-Poly1305 on your device. Your master password never leaves the device (key derived with Argon2id); the server stores only ciphertext and a hash of the login verifier. With the official server, on-screen text is never uploaded; it stays on your device |
 
 ## Install
 
@@ -109,9 +109,7 @@ Requires macOS 14 or later, or Windows 10/11 (64-bit).
 - Linux computers; the Android app does not record location yet and is not release-signed
 - iPhone Screen Time can only be read on a Mac. With only a Windows computer you won't see which phone apps you used (location still works)
 - The Windows build is still a preview. It isn't code-signed, so SmartScreen blocks the first run; choose "More info → Run anyway". Antivirus software may flag the keyboard hook as a keylogger; allow it. Apps running as administrator can't be read (Beayy doesn't elevate)
-- The official model allowance is 50,000 tokens a month, enough to try Beayy out (a 10-minute summary takes about 6,000 tokens). For daily use, bring your own model. Transcription and maps aren't included
-- Summaries and journals are written in Chinese for now. In the English interface, those and the messages that come from the server are still in Chinese
-- The iPhone app's interface is still in Chinese
+- The official model allowance is 50,000 tokens a month, enough to try Beayy out (the official model summarizes once an hour by default, which still takes tens of thousands of tokens a day). For daily use, bring your own model. Transcription and maps aren't included
 
 ## Build from source
 

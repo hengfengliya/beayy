@@ -76,9 +76,9 @@ final class Recorder: ObservableObject {
             DispatchQueue.main.async {
                 guard granted else {
                     #if os(watchOS)
-                    self.message = "没有麦克风权限：到手表「设置 › 隐私与安全性 › 麦克风」打开 Beayy"
+                    self.message = tr("没有麦克风权限：到手表「设置 › 隐私与安全性 › 麦克风」打开 Beayy")
                     #else
-                    self.message = "没有麦克风权限：到「设置 › Beayy」打开麦克风"
+                    self.message = tr("没有麦克风权限：到「设置 › Beayy」打开麦克风")
                     #endif
                     return
                 }
@@ -89,7 +89,7 @@ final class Recorder: ObservableObject {
                     self.since = self.since ?? Date()
                     self.message = nil
                 } catch {
-                    self.message = "开始录音失败：\(error.localizedDescription)"
+                    self.message = tr("开始录音失败：{e}", ["e": error.localizedDescription])
                 }
             }
         }
@@ -118,7 +118,7 @@ final class Recorder: ObservableObject {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw NSError(domain: "Beayy", code: 1, userInfo: [NSLocalizedDescriptionKey: "麦克风没有输入"])
+            throw NSError(domain: "Beayy", code: 1, userInfo: [NSLocalizedDescriptionKey: tr("麦克风没有输入")])
         }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 8192, format: format) { [weak self] buffer, _ in
@@ -149,7 +149,7 @@ final class Recorder: ObservableObject {
         switch type {
         case .began:
             if isRecording { halt() }
-            message = "录音被打断（电话或 Siri），结束后自动接着录"
+            message = tr("录音被打断（电话或 Siri），结束后自动接着录")
         case .ended:
             if wantsRecording { start() }
         @unknown default:
@@ -167,7 +167,7 @@ final class Recorder: ObservableObject {
             try file?.write(from: buffer)
         } catch {
             closeSegment()
-            DispatchQueue.main.async { self.message = "写录音文件出错：\(error.localizedDescription)" }
+            DispatchQueue.main.async { self.message = tr("写录音文件出错：{e}", ["e": error.localizedDescription]) }
         }
     }
 
@@ -184,7 +184,7 @@ final class Recorder: ObservableObject {
                                    commonFormat: format.commonFormat, interleaved: format.isInterleaved)
             current = (url, start)
         } catch {
-            DispatchQueue.main.async { self.message = "建录音文件失败：\(error.localizedDescription)" }
+            DispatchQueue.main.async { self.message = tr("建录音文件失败：{e}", ["e": error.localizedDescription]) }
         }
     }
 
@@ -211,7 +211,7 @@ final class Recorder: ObservableObject {
             self.segmentsDone += 1
             if level >= 0 && level < self.stopBattery && self.isRecording {
                 self.stop()
-                self.message = "电量低于 5%，已停止录音"
+                self.message = tr("电量低于 5%，已停止录音")
             }
         }
     }

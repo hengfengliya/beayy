@@ -140,7 +140,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "beayy"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-capture",
  "beayy-core",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-capture"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-core",
  "block2",
@@ -182,23 +182,25 @@ dependencies = [
 
 [[package]]
 name = "beayy-core"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sys-locale",
 ]
 
 [[package]]
 name = "beayy-install"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
+ "beayy-core",
  "windows",
 ]
 
 [[package]]
 name = "beayy-mobile"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-core",
  "beayy-remote",
@@ -215,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-phone"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-core",
  "chrono",
@@ -224,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-remote"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "base64 0.22.1",
  "beayy-core",
@@ -236,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-setup"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-install",
  "flate2",
@@ -247,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-summary"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "beayy-core",
  "beayy-sync",
@@ -259,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-sync"
-version = "0.2.53"
+version = "0.2.54"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -3655,6 +3657,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

@@ -1,10 +1,11 @@
 //! 日总结、周总结、月总结：app 自己用记录写，不依赖外部脚本。
 //! 数字（在电脑前、手机、领域和项目、类型、规矩守没守住、去了哪、说了多少话）由代码算好填进去；模型只写一句话、做成了什么、偏离、明天。
 //! 写到 Beayy/daily/日总结_YYYYMMDD.md、周总结_YYYYMMDD.md（日期取周一）、月总结_YYYYMM.md。每天 21:30 写当天，次日 0:15 以后用完整的一天重写；
-//! 每 10 分钟看一遍最近 7 天：缺的补上（app 没开、模型出错），数据晚到的（手机录音、屏幕使用时间隔几天才同步过来）重写；
+//! 每 10 分钟看一遍最近 7 天：缺的补上（app 没开、模型出错），数据晚到的（手机录音、屏幕使用时间隔几天才同步过来）重写（用官方模型时过完那天只因此重写一次）；
 //! 上一周过完写周总结，那周的日总结重写过就跟着重写；上个月过完写月总结（用那个月的周总结和每天的一句话），同样跟着重写。每次的结果记在 daily/state.json，失败按次数往后推着重试。页面上也可以随时生成。
 
 use beayy_core::default_root;
+use beayy_core::i18n::{tr, tr_with};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 use regex::Regex;
 use serde_json::Value;
@@ -159,7 +160,7 @@ fn check(rule: &str, date: NaiveDate, day: &Value) -> (String, Option<bool>) {
     if let Some(x) = crate::money::budget_check(rule, date) {
         return x;
     }
-    let Some(r) = parse_rule(rule) else { return ("算不出来，看下面的偏离".into(), None) };
+    let Some(r) = parse_rule(rule) else { return (tr("算不出来，看下面的偏离"), None) };
     let live = &day["live"];
     let phone = &day["phone"];
     let iso = |v: &Value| v.as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&Utc));
@@ -169,7 +170,7 @@ fn check(rule: &str, date: NaiveDate, day: &Value) -> (String, Option<bool>) {
         Rule::After { dev, h, m } => {
             let from = start + Duration::minutes((h * 60 + m) as i64);
             if Utc::now() < from {
-                return (format!("还没到 {h:02}:{m:02}"), None);
+                return (tr_with("还没到 {t}", &[("t", &format!("{h:02}:{m:02}"))]), None);
             }
             let mut sec = 0.0;
             if dev != "phone" {
@@ -184,11 +185,11 @@ fn check(rule: &str, date: NaiveDate, day: &Value) -> (String, Option<bool>) {
                     }
                 }
             }
-            (format!("{h:02}:{m:02} 以后用了 {} 分钟", (sec / 60.0).round()), Some(sec < 60.0))
+            (tr_with("{t} 以后用了 {n} 分钟", &[("t", &format!("{h:02}:{m:02}")), ("n", &(sec / 60.0).round().to_string())]), Some(sec < 60.0))
         }
         Rule::Limit { dev, minutes } => {
             let sec = if dev == "phone" { phone["total_sec"].as_f64().unwrap_or(0.0) } else { live["active_sec"].as_f64().unwrap_or(0.0) };
-            (format!("{} {:.1} 小时 / 上限 {:.1} 小时", if dev == "phone" { "手机" } else { "电脑" }, sec / 3600.0, minutes / 60.0), Some(sec <= minutes * 60.0))
+            (tr_with(if dev == "phone" { "手机 {h} 小时 / 上限 {max} 小时" } else { "电脑 {h} 小时 / 上限 {max} 小时" }, &[("h", &format!("{:.1}", sec / 3600.0)), ("max", &format!("{:.1}", minutes / 60.0))]), Some(sec <= minutes * 60.0))
         }
         Rule::App { app, minutes } => {
             let key = app.to_lowercase();
@@ -206,7 +207,7 @@ fn check(rule: &str, date: NaiveDate, day: &Value) -> (String, Option<bool>) {
                     sec += a["sec"].as_f64().unwrap_or(0.0);
                 }
             }
-            (format!("{app} {} 分钟 / 上限 {} 分钟", (sec / 60.0).round(), minutes), Some(sec <= minutes * 60.0))
+            (tr_with("{app} {n} 分钟 / 上限 {max} 分钟", &[("app", &app), ("n", &(sec / 60.0).round().to_string()), ("max", &minutes.to_string())]), Some(sec <= minutes * 60.0))
         }
     }
 }
@@ -594,9 +595,19 @@ fn speech_text(speech: &Value) -> Option<(String, Vec<String>)> {
 
 /// 写某天的日总结（结果记进 state.json）；返回 Markdown
 pub fn generate(date: NaiveDate) -> Result<String, String> {
+    let key = date.format("%Y-%m-%d").to_string();
+    // 那天过完以后又写过几次（0:15 那次不算）：数据晚到时用官方模型只重写一次，见 day_due
+    let prev = read_state()["days"][&key].clone();
+    let after = prev["at"].as_i64().and_then(|t| DateTime::from_timestamp(t, 0)).map(|t| t.with_timezone(&Local).date_naive() > date).unwrap_or(false);
+    let late = prev["late"].as_i64().unwrap_or(0) + after as i64;
     let bytes = input_bytes(date);
     let r = write_day(date);
-    record("days", &date.format("%Y-%m-%d").to_string(), bytes, &r);
+    record("days", &key, bytes, &r);
+    if r.is_ok() && late > 0 {
+        let mut e = read_state()["days"][&key].clone();
+        e["late"] = serde_json::json!(late);
+        note("days", &key, e);
+    }
     r
 }
 
@@ -1024,7 +1035,9 @@ fn day_due(d: NaiveDate, st: &Value) -> bool {
         return true;
     }
     let at = e["at"].as_i64().and_then(|t| DateTime::from_timestamp(t, 0)).map(|t| t.with_timezone(&Local).date_naive());
-    at.map(|a| a <= d).unwrap_or(true) || grew
+    // 用官方模型：过完那天以后已经因为数据晚到重写过一次的，不再重写（省账号额度）
+    let late_ok = e["late"].as_i64().unwrap_or(0) < 1 || !beayy_summary::Summarizer::new(default_root()).official();
+    at.map(|a| a <= d).unwrap_or(true) || (grew && late_ok)
 }
 
 /// 过完的周要不要（重）写：那周有日总结，周总结没写、或之后那周的日总结又重写过

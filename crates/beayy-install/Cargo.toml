@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
+beayy-core.workspace = true
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_System_Com",

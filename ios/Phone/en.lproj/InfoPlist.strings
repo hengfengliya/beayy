@@ -1,0 +1,6 @@
+/* 由 tools/生成InfoPlist译文.py 生成，勿手改：中文在 Info.plist，英文在 ui/locales/en.js */
+"NSHealthShareUsageDescription" = "Reads Apple Health data (sleep, steps, workouts, heart rate, mood and more), encrypts it and syncs it to your own computer for your daily records and reviews. Read only, never writes.";
+"NSHealthUpdateUsageDescription" = "Beayy doesn’t write data to Health.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Choose “Always” to record the places you stay while the app isn’t open. Only stays are recorded, not your route.";
+"NSLocationWhenInUseUsageDescription" = "Records where you stay (arrival, departure and place) to count time at home, at work and out, and to tag conversations with places.";
+"NSMicrophoneUsageDescription" = "All-day recording (on iPhone when you’re not wearing your watch), transcribed into your life record. Also used to record a voiceprint that recognizes you.";

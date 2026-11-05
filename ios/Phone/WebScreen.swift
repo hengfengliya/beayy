@@ -29,6 +29,9 @@ struct WebScreen: UIViewRepresentable {
         })();
         """
         cfg.userContentController.addUserScript(WKUserScript(source: shim, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // 界面语言和外壳同一个判断（Shared/I18n.swift）：i18n.js 先看它，不按网页视图报的 navigator.language
+        // （那个跟 app 本地化走，系统是日文这类没有的语言时退回 zh-Hans，外壳却是英文）
+        cfg.userContentController.addUserScript(WKUserScript(source: "window.__BEAYY_LANG = \"\(I18n.lang)\";", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         cfg.userContentController.add(context.coordinator, name: "beayy")
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.scrollView.contentInsetAdjustmentBehavior = .never  // 刘海、底部横条由网页按 env(safe-area-inset-*) 留
@@ -58,7 +61,7 @@ struct WebScreen: UIViewRepresentable {
             queue.async {
                 let out: String = cmd.withCString { c in
                     json.withCString { a in
-                        guard let p = beayy_call(c, a) else { return #"{"err":"Rust 核心没返回"}"# }
+                        guard let p = beayy_call(c, a) else { return Self.err(tr("Rust 核心没返回")) }
                         defer { beayy_free(p) }
                         return String(cString: p)
                     }
@@ -67,8 +70,13 @@ struct WebScreen: UIViewRepresentable {
             }
         }
 
+        /// {"err": 一句话}，转义交给 JSONSerialization
+        private static func err(_ s: String) -> String {
+            (try? JSONSerialization.data(withJSONObject: ["err": s])).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"err":"?"}"#
+        }
+
         private func reply(_ id: Int, _ res: [String: Any]) {
-            let out = (try? JSONSerialization.data(withJSONObject: res)).flatMap { String(data: $0, encoding: .utf8) } ?? #"{"err":"返回值不对"}"#
+            let out = (try? JSONSerialization.data(withJSONObject: res)).flatMap { String(data: $0, encoding: .utf8) } ?? Self.err(tr("返回值不对"))
             web?.evaluateJavaScript("window.__beayyResolve(\(id), \(out))")
         }
     }
@@ -119,11 +127,11 @@ final class NativeUI: ObservableObject {
             #if targetEnvironment(simulator)
             case "health_demo": Task { await Health.shared.seedDemo() }
             #endif
-            default: return ["err": "手机没有这个操作"]
+            default: return ["err": tr("手机没有这个操作")]
             }
             return ["ok": NSNull()]
         default:
-            return ["err": "手机没有这个功能：\(cmd)"]
+            return ["err": tr("手机没有这个功能：{cmd}", ["cmd": cmd])]
         }
     }
 }

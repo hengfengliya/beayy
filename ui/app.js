@@ -36,7 +36,51 @@ async function loadMock(name) {
   return JSON.parse(JSON.stringify(MOCK[name]));
 }
 
+/** 后台给的拼好的一句（报错、状态）：英文界面先整句查表，查不到就拿表里带 {…} 的原句当模板对，
+ *  对上了把各段值也翻了再填进英文；和 Rust 的 beayy_core::i18n::tr_msg 同一套规则 */
+const HAN = /[\u4e00-\u9fff]/;
+let MSG_TPL = null;
+function trMsg(s) {
+  if (LANG !== "en" || typeof s !== "string" || !HAN.test(s)) return s;
+  const dict = window.I18N_EN || {};
+  if (dict[s] != null) return tr(s);
+  if (!MSG_TPL) {
+    const ph = /\{([^{}]*)\}/g;
+    // 两个占位符挨着的（{e}{BUSY}）对不准，不当模板
+    MSG_TPL = Object.keys(dict).filter((k) => /\{[^{}]*\}/.test(k) && !/\}\{/.test(k) && typeof dict[k] === "string").map((k) => {
+      const names = [...k.matchAll(ph)].map((m) => m[1].split(":")[0]);
+      const lits = k.split(ph).filter((_, i) => i % 2 === 0);
+      const re = new RegExp("^" + lits.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("([\\s\\S]+?)") + "$");
+      return { re, names, en: dict[k], len: lits.join("").length };
+    }).sort((a, b) => b.len - a.len);
+  }
+  for (const t of MSG_TPL) {
+    const m = t.re.exec(s);
+    if (!m) continue;
+    const vals = m.slice(1).map(trMsg);
+    let nth = 0;
+    const pos = t.names.map((n, i) => (n ? -1 : i)).filter((i) => i >= 0);
+    return t.en.replace(/\{([^{}]*)\}/g, (_, n) => { const name = n.split(":")[0]; const i = name ? t.names.indexOf(name) : pos[nth++]; return i >= 0 && i != null ? vals[i] : ""; });
+  }
+  return s;
+}
+/** 后台回来的结果里报错类的字段（error、errors、last_error）走 trMsg */
+function trResult(v, depth = 0) {
+  if (LANG !== "en" || !v || typeof v !== "object" || depth > 4) return v;
+  for (const k of Object.keys(v)) {
+    const x = v[k];
+    if ((k === "error" || k === "last_error") && typeof x === "string") v[k] = trMsg(x);
+    else if (k === "errors" && Array.isArray(x)) v[k] = x.map(trMsg);
+    else if (x && typeof x === "object") trResult(x, depth + 1);
+  }
+  return v;
+}
+
 async function call(cmd, args = {}) {
+  try { return trResult(await callRaw(cmd, args)); } catch (e) { throw typeof e === "string" ? trMsg(e) : e && typeof e.message === "string" ? new Error(trMsg(e.message)) : e; }
+}
+
+async function callRaw(cmd, args = {}) {
   if (TAURI) return TAURI.invoke(cmd, args);
   // 浏览器里：写操作只改内存，读操作读样例
   switch (cmd) {
@@ -73,11 +117,14 @@ async function call(cmd, args = {}) {
     // 同步：换方式、新开、加入只改内存，方便在浏览器里点一遍
     case "sync_status": return mockState.sync || loadMock("sync_status");
     case "account_logout": mockState.sync = { configured: false }; return null;
+    case "account_stop_sync": { const cur = mockState.sync || await loadMock("sync_status"); mockState.sync = { configured: false, service_email: cur.email }; return null; }
+    case "account_service_login": case "account_service_signup": mockState.sync = { ...(mockState.sync || await loadMock("sync_status")), service_email: args.email }; return cmd.endsWith("signup") ? "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789" : null;
+    case "account_service_logout": mockState.sync = { ...(mockState.sync || {}), service_email: null }; return null;
     case "icloud_state": return { available: true, path: "~/Library/Mobile Documents/iCloud~com~fengli~beayy/Documents", vault: false };
     case "webdav_state": return { ok: true, vault: false };
     case "icloud_create": case "webdav_create": case "folder_create": case "icloud_join": case "webdav_join": case "folder_join": {
       const mode = cmd.split("_")[0];
-      mockState.sync = { configured: true, mode, folder: mode === "folder" ? "/Users/demo/OneDrive/Beayy" : null, webdav: mode === "webdav" ? args.url : null, last: new Date().toISOString() };
+      mockState.sync = { service_email: (mockState.sync || {}).service_email, configured: true, mode, folder: mode === "folder" ? "/Users/demo/OneDrive/Beayy" : null, webdav: mode === "webdav" ? args.url : null, last: new Date().toISOString() };
       return cmd.endsWith("_create") ? "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789" : null;
     }
     case "account_recovery_code": return "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789";
@@ -193,8 +240,8 @@ function md(text) {
 function story(parts) {
   const row = (p) => {
     const items = p.body.split("\n").map((l) => l.trim().match(/^[-*]\s+(.*)/)).filter(Boolean).map((m) => m[1]);
-    const body = items.length ? `<ul class="lg-list">${items.map((t) => `<li>${mdInline(t)}</li>`).join("")}</ul>` : md(p.body);
-    return `<section class="lg-row"><div class="lg-k"><h2>${esc(p.title)}</h2>${items.length ? `<span>${tr("{n} 项", { n: items.length })}</span>` : ""}</div>${body}</section>`;
+    const body = items.length ? `<ul class="lg-list">${items.map((t) => `<li>${mdInline(trMsg(t))}</li>`).join("")}</ul>` : md(trMsg(p.body));
+    return `<section class="lg-row"><div class="lg-k"><h2>${esc(tr(p.title))}</h2>${items.length ? `<span>${tr("{n} 项", { n: items.length })}</span>` : ""}</div>${body}</section>`;
   };
   return `<div class="story">${parts.map(row).join("")}</div>`;
 }
@@ -461,12 +508,12 @@ function healthSection(h) {
   if (act.length) rows.push([tr("活动"), act.join(" · ")]);
   const heart = [hr.n && tr("平均 {avg}，{min}–{max}", { avg: hr.avg, min: hr.min, max: hr.max }), hr.resting != null && tr("静息 {n}", { n: hr.resting }), hr.hrv_ms != null && tr("心率变异性 {n} 毫秒", { n: hr.hrv_ms })].filter(Boolean);
   if (heart.length) rows.push([tr("心率"), heart.join(" · ")]);
-  for (const w of h.workouts || []) rows.push([tr("锻炼"), `${hm(w.start)}–${hm(w.end)} ${esc(w.name)} ${healthDur(w.sec)}`
+  for (const w of h.workouts || []) rows.push([tr("锻炼"), `${hm(w.start)}–${hm(w.end)} ${esc(trMsg(w.name))} ${healthDur(w.sec)}`
     + [w.distance_m && ` · ${tr("{n} 公里", { n: (w.distance_m / 1000).toFixed(1) })}`, w.kcal && ` · ${tr("{n} 千卡", { n: w.kcal })}`, w.avg_hr && ` · ${tr("平均心率 {n}", { n: w.avg_hr })}`].filter(Boolean).join("")]);
   for (const m of h.moods || []) rows.push([tr("心情"), `${hm(m.at)} ${valenceText(m.valence)}`]);
   if (h.mindful_sec) rows.push([tr("正念"), healthDur(h.mindful_sec)]);
   const kv = (rs, cls = "kv") => `<dl class="${cls}">${rs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
-  const other = (h.others || []).map((o) => [esc(o.name), o.agg === "count" ? tr("{n} 次", { n: o.n })
+  const other = (h.others || []).map((o) => [esc(trMsg(o.name)), o.agg === "count" ? tr("{n} 次", { n: o.n })
     : `${o.agg === "sum" ? tr("共 ") : o.n > 1 ? tr("平均 ") : ""}${healthNum(o.value, o.unit)}${o.min != null ? tr("（{a}–{b}）", { a: healthNum(o.min, o.unit), b: healthNum(o.max, o.unit) }) : ""}${o.unit === "%" ? "%" : " " + esc(HEALTH_UNIT[o.unit] ?? o.unit ?? "")}`]);
   return section(tr("健康"), (rows.length ? kv(rows) : "") + (other.length ? `<details class="adv"><summary>${tr("其他 {n} 项", { n: other.length })}</summary>${kv(other, "kv kv-wide")}</details>` : ""));
 }
@@ -889,6 +936,8 @@ async function loadUpdate() {
 }
 
 /** 更新说明：latest.json 里是一句话、分号隔开几件事，拆成 1. 2. 一行一件（只有一件就照写） */
+/** 更新说明：英文界面用 notes_en（0.2.54 起发版带两份），没有就退回中文 */
+const upNotes = (u) => (LANG === "en" && u.notes_en) || u.notes;
 function noteList(notes) {
   const items = String(notes || "").split(/[；;\n]+/).map((x) => x.trim().replace(/[。.]$/, "")).filter(Boolean);
   if (!items.length) return "";
@@ -904,7 +953,7 @@ function updatePrompt() {
   if (later.v === u.latest && Date.now() < later.until) return;
   openDialog({
     title: tr("新版本 {v} 已就绪", { v: u.latest }),
-    body: `${illus("update", true)}${noteList(u.notes)}<p class="note up-meta">${tr("当前版本 {v}", { v: esc(u.current || "") })}</p>`,
+    body: `${illus("update", true)}${noteList(upNotes(u))}<p class="note up-meta">${tr("当前版本 {v}", { v: esc(u.current || "") })}</p>`,
     ok: tr("重启更新"), busy: tr("正在更新…"), cancel: tr("稍后"),
     // 装好了 app 会自己退出重开；没装成把错写在窗口里
     submit: async () => { await call("update_apply"); return false; },
@@ -951,7 +1000,7 @@ function aboutSection() {
   const u = S.update || {}, st = S.status || {};
   const state = upState(u);
   const btn = u.newer && u.ready && !u.updatable ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-go">${tr("重启更新")}</button>` : `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-check" ${upBusy(u) ? "disabled" : ""}>${tr("检查更新")}</button>`;
-  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本")}</div><div class="mx-setting-desc">${esc(u.current || st.version || "")} · <span id="up-state">${esc(state)}</span></div>${u.newer && u.notes ? `<div class="mx-setting-desc">${esc(u.notes)}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
+  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本")}</div><div class="mx-setting-desc">${esc(u.current || st.version || "")} · <span id="up-state">${esc(state)}</span></div>${u.newer && upNotes(u) ? `<div class="mx-setting-desc">${esc(upNotes(u))}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
 }
 
 function bindAbout() {
@@ -1102,8 +1151,9 @@ async function renderToday() {
   }
   const placesView = pview === "often" ? oftenView(PL.stats) : visits.length ? placesSection(visits, today, sp && sp.conversations, pview)
     : emptyBlock("map", past ? tr("这一天没有停留点") : tr("今天还没有停留点"));
-  // 有 30 分钟以前的段还没摘要：多半是模型没配好或额度用完，说一句、给个去处
-  const rawOld = tab !== "phone" && tab !== "watch" && (d.segments || []).some((s) => s.source === "raw" && Date.parse(s.end) < Date.now() - 1800e3);
+  // 过了摘要间隔再加半小时还没摘要的段：多半是模型没配好或额度用完，说一句、给个去处
+  const wait = ((S.settings && S.settings.summary_minutes) || 60) + 30;
+  const rawOld = tab !== "phone" && tab !== "watch" && (d.segments || []).some((s) => s.source === "raw" && Date.parse(s.end) < Date.now() - wait * 60e3);
   const rawNote = rawOld ? `<p class="note raw-note">${tr("没有摘要的时段只列了用过的 app")} · <a href="#/settings" data-set-tab="ai">${tr("设置模型")}</a></p>` : "";
   const timeline = shown.length ? rawNote + `<div class="tl" id="tl">${tab === "all" ? hourRows(d, items) : tab === "phone" && visits.length ? phoneByPlace(shown, visits, today) : shown.map(tlRow).join("")}</div>`
     : past ? (tab === "phone" || tab === "watch" ? emptyInline(tab === "phone" ? tr("这一天没有手机记录") : tr("这一天没有对话")) : emptyBlock("day", tr("这一天没有记录")))
@@ -1640,7 +1690,7 @@ function bindTabs(date) {
 /** 手机不写总结（电脑端为准），只看电脑同步来的：不放「现在生成」「重新生成」 */
 const canWrite = () => !(S.status && S.status.mobile);
 /** 总结末尾一行：口径说明（由 Beayy 用……生成，数据截至……）＋「重新生成」 */
-const sumFoot = (note, id) => `<p class="note sum-foot">${esc(note || "")}${canWrite() ? `<button class="mx-btn mx-btn--text mx-btn--sm" id="${id}">${tr("重新生成")}</button>` : ""}</p>`;
+const sumFoot = (note, id) => `<p class="note sum-foot">${esc(trMsg(note || ""))}${canWrite() ? `<button class="mx-btn mx-btn--text mx-btn--sm" id="${id}">${tr("重新生成")}</button>` : ""}</p>`;
 /** 还没有总结：一句说明＋「现在生成」（手机上只有说明）。说明写清会自动写，按钮只是不想等时用，免得读成两件事 */
 const sumEmpty = (title, text, id, err) => section(title, emptyBlock("notebook", canWrite() ? tr("{text}，也可以现在生成", { text }) : tr("总结在电脑上写，写好会同步过来"),
   canWrite() ? `<button class="mx-btn mx-btn--secondary" id="${id}">${tr("现在生成")}</button>` : "") + (err ? `<div class="mx-field-error">${esc(err)}</div>` : ""));
@@ -2699,7 +2749,9 @@ function syncPanel(sy) {
   const msg = (DS.err ? `<div class="mx-field-error">${esc(DS.err)}</div>` : "") + (DS.msg || AC.msg ? `<p class="note">${esc(DS.msg || AC.msg)}</p>` : "");
   const btn = (id, text) => smallBtn(id, text);
   const confirm = (go) => `<div class="btns"><button class="mx-btn mx-btn--text mx-btn--sm" id="logout-keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger mx-btn--sm" id="logout-go">${go}</button></div>`;
-  if (cur === "none") return section(tr("同步"), cards + msg);
+  // 同步不走 Beayy 服务时，单为官方服务（模型、转写、地图）登的账号
+  const svc = sy.service_email ? setRow(tr("Beayy 账号"), `${esc(sy.service_email)} · ${tr("官方模型、转写、地图用")}`, btn("svc-logout", tr("退出登录"))) : "";
+  if (cur === "none") return section(tr("同步"), cards + (svc ? `<div class="rows">${svc}</div>` : "") + msg);
   // 旧版配对码账号、登录失效：先把这件事办了
   if (cur === "server" && !sy.email) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("邮箱和主密码"), tr("旧版配对码账号，设好邮箱和主密码就能在别的设备登录"), btn("ac-claim", tr("设好账号")))}</div>` + msg);
   if (sy.need_login) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("登录已失效"), tr("重新登录后接着同步"), btn("ac-login", tr("重新登录")))}</div>` + msg);
@@ -2715,7 +2767,7 @@ function syncPanel(sy) {
   return section(tr("同步"), cards + `<div class="rows">`
     + setRow(wayName(cur), `${target ? `<span class="mono">${esc(target)}</span>` : ""}${target && DS.done ? "<br>" : ""}${DS.done ? esc(DS.done) : ""}`, `<span class="btns">${state}<button class="mx-btn mx-btn--secondary mx-btn--sm" id="sync-now" ${busy ? "disabled" : ""}>${tr("立即同步")}</button></span>`)
     + bar + (sy.last_error ? `<div class="mx-error">${esc(sy.last_error)}</div>` : "")
-    + leave
+    + leave + svc
     + setRow(tr("主密码"), cur === "server" ? tr("只在设备上用，不会发给服务器") : gap(tr("加入同步时要输，{where}读不到内容", { where: wayName(cur) })), btn("ac-password", tr("更改")))
     + setRow(tr("恢复码"), tr("忘了主密码、设备全丢了，凭它解开记录"), btn("ac-show-code", tr("查看")))
     + `</div>` + msg);
@@ -2762,8 +2814,8 @@ function pickWay(way) {
     body: `<p class="note">${gap(tr("先停掉现在的{cur}。这台的记录不受影响，{cur}里已有的也还在。", { cur: wayName(cur) }))}</p>`,
     ok: way === "none" ? tr("停止同步") : tr("停掉并换"), okClass: way === "none" ? "danger" : "primary", busy: tr("处理中…"),
     submit: async () => {
-      await call("account_logout");
-      DS.account = null; DS.done = DS.err = DS.msg = AC.msg = null; AC.confirmLogout = false;
+      await call(cur === "server" ? "account_stop_sync" : "account_logout");
+      DS.account = null; SS.llm = null; DS.done = DS.err = DS.msg = AC.msg = null; AC.confirmLogout = false;
       await renderSettings();
       if (way !== "none") setTimeout(() => setupWay(way));
     },
@@ -2830,6 +2882,7 @@ function bindData(sy) {
   on("ac-show-code", async () => { try { codeDialog(await call("account_recovery_code"), false); } catch (x) { AC.msg = tr("取不到恢复码：{e}", { e: x }); renderSettings(); } });
   on("ac-logout", () => { AC.confirmLogout = true; renderSettings(); });
   on("logout-keep", () => { AC.confirmLogout = false; renderSettings(); });
+  on("svc-logout", async () => { await call("account_service_logout"); SS.llm = null; renderSettings(); });
   on("logout-go", async () => { await call("account_logout"); AC.confirmLogout = false; AC.msg = null; DS.account = null; DS.done = null; renderSettings(); });
   on("sync-now", async () => {
     DS.busy = true; DS.err = DS.msg = DS.done = null; renderSettings();
@@ -3077,11 +3130,14 @@ const checkPw = (el) => {
   return a;
 };
 /** 账号变了：登录着的设备列表重取，当前页重画（设置页和设备页都能开这些弹层） */
-const accountChanged = () => { DS.account = null; return renderSettings(); };
+const accountChanged = () => { DS.account = null; SS.llm = null; return renderSettings(); };
+/** 官方服务要登录：同步用的是 Beayy 服务或还没同步，登录就是开 Beayy 服务同步；用 iCloud、网盘、文件夹时只为官方服务登，同步不变 */
+const officialLogin = () => loginDialog("login", "", !["none", "server"].includes(syncWay(S.sync)));
 
 /** 登录、注册、用恢复码重设（小弹层，底下可以互相切换） */
-function loginDialog(mode = "login", email = "") {
+function loginDialog(mode = "login", email = "", svc = false) {
   const sy = S.sync || {};
+  const cmd = (c) => (svc ? c.replace("account_", "account_service_") : c);
   const em = dlgField("em", tr("邮箱"), { ph: "you@example.com", value: email || sy.email || "" });
   const pw2 = dlgField("pw2", tr("再输一次"), { type: "password" });
   const forms = {
@@ -3097,12 +3153,12 @@ function loginDialog(mode = "login", email = "") {
   const server = cf.sync_server ? `<p class="note">${tr("服务器 {host}", { host: `<span class="mono">${esc(hostOf(cf.sync_server))}</span>` })}${sy.configured ? "" : ` <button class="mx-btn mx-btn--text mx-btn--sm" data-server>${tr("更改")}</button>`}</p>` : "";
   openDialog({
     title, ok, busy,
-    body: (mode === "recover" ? `<p class="note">${tr("重设后，其他设备要重新登录")}</p>` : `<p class="note">${tr("记录在本机加密后再同步，服务器读不到内容")}</p>`) + body
+    body: (mode === "recover" ? `<p class="note">${tr("重设后，其他设备要重新登录")}</p>` : `<p class="note">${svc ? gap(tr("只用来开官方模型、转写和地图，还用{way}同步", { way: wayName(syncWay(S.sync)) })) : tr("记录在本机加密后再同步，服务器读不到内容")}</p>`) + body
       + server + `<div class="dlg-links">${links.map(([k, v]) => `<button class="mx-btn mx-btn--text mx-btn--sm" data-to="${k}">${v}</button>`).join("")}</div>`,
     onOpen: (el) => {
-      el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => loginDialog(b.dataset.to, dlgVal(el, "em"))));
+      el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => loginDialog(b.dataset.to, dlgVal(el, "em"), svc)));
       const sv = el.querySelector("[data-server]");
-      if (sv) sv.onclick = () => { const em = dlgVal(el, "em"); syncServerDialog(() => loginDialog(mode, em)); };
+      if (sv) sv.onclick = () => { const em = dlgVal(el, "em"); syncServerDialog(() => loginDialog(mode, em, svc)); };
       // 注册：问服务器要不要邀请码；开放注册的写明每个账号能存多少，满了怎么办
       if (mode === "signup") call("signup_info").then((i) => {
         const box = el.querySelector("#inv-box"), note = el.querySelector("#inv-note");
@@ -3116,9 +3172,9 @@ function loginDialog(mode = "login", email = "") {
     submit: async (el) => {
       const email = checkEmail(dlgVal(el, "em"));
       AC.msg = null;
-      if (mode === "login") await call("account_login", { email, password: el.querySelector("#pw1").value });
-      else if (mode === "signup") { const code = await call("account_signup", { invite: dlgVal(el, "inv"), email, password: checkPw(el) }); setTimeout(() => codeDialog(code, true)); }
-      else { await call("account_recover", { email, code: dlgVal(el, "rc"), password: checkPw(el) }); AC.msg = tr("已重设，其他设备要重新登录"); }
+      if (mode === "login") await call(cmd("account_login"), { email, password: el.querySelector("#pw1").value });
+      else if (mode === "signup") { const code = await call(cmd("account_signup"), { invite: dlgVal(el, "inv"), email, password: checkPw(el) }); setTimeout(() => codeDialog(code, true)); }
+      else { await call(cmd("account_recover"), { email, code: dlgVal(el, "rc"), password: checkPw(el) }); AC.msg = tr("已重设，其他设备要重新登录"); }
       accountChanged();
     },
   });
@@ -3293,15 +3349,17 @@ function dropSettings() { const r = document.getElementById("set-root"); if (r) 
 const tokText = (n) => (n >= 1e4 ? tr("{n} 万 token", { n: numText(Math.round(n / 1e4)), k: numText(Math.round(n / 1e3)) }) : tr("{n} token", { n: numText(n) }));
 /** 官方的某一项（模型、转写、地图）现在怎样：要登录、没开通，或者本月用了多少（上限 0＝不限，负数＝这一项没开） */
 function officialDesc(u, fmt) {
-  const L = SS.llm, way = syncWay(S.sync);
-  if (way !== "none" && way !== "server") return tr("官方的要用 Beayy 服务同步");
+  const L = SS.llm;
   if (!L) return "";
   if (L.error) return tr("要登录 Beayy 账号");
   if (L.plan === "stopped") return tr("已停用");
   if (L.plan !== "official") return tr("这个账号没开通");
+  if (L.until && L.until < Date.now()) return tr("试用已结束");
   const q = (u && u.quota) || 0;
-  return q < 0 ? tr("这一项没开通") : tr("本月 {u} / {q}", { u: fmt((u && u.used) || 0), q: q ? fmt(q) : tr("不限") });
+  return q < 0 ? tr("这一项没开通") : (L.until ? tr("试用到 {d}", { d: mmdd(L.until) }) + " · " : "") + tr("本月 {u} / {q}", { u: fmt((u && u.used) || 0), q: q ? fmt(q) : tr("不限") });
 }
+/** 毫秒时刻 → 本地的「11-12」 */
+const mmdd = (ms) => { const t = new Date(ms); return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
 
 /** 设置「AI」页：写总结用的模型（本月用量写在这一行）、语言、棒喝；接到别的 AI */
 function aiBody(cf, st) {
@@ -3309,7 +3367,7 @@ function aiBody(cf, st) {
   const used30 = SS.usage && !SS.usage.error ? (SS.usage.days || []).reduce((a, d) => a + d.in + d.out, 0) : null;
   const model = official ? [tr("官方"), officialDesc(SS.llm && SS.llm.llm, tokText)].filter(Boolean).join(" · ")
     : `${tr("自己的")} · <span class="mono">${esc(hostOf(cf.gateway))} · ${esc(cf.model_segment || tr("没填模型"))}</span> · ${ks ? tr("密钥已存") : tr("没有密钥")}${used30 != null ? ` · ${tr("近 30 天 {n}", { n: tokText(used30) })}` : ""}`;
-  const login = official && SS.llm && SS.llm.error && ["none", "server"].includes(syncWay(S.sync)) ? smallBtn("ac-login", tr("登录")) : "";
+  const login = official && SS.llm && SS.llm.error ? smallBtn("ac-login", tr("登录")) : "";
   const seg = (id, list, cur) => `<div class="mx-seg" role="tablist" id="${id}">${list.map(([k, v]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
   return section(tr("总结"), setRow(tr("模型"), model, `<span class="btns">${mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm" id="c-usage">${tr("用量")}</button>`}${login}${smallBtn("c-model", tr("更改"))}</span>`)
       + setRow(tr("语言"), "", seg("sum-lang", SUM_LANGS, cf.summary_language || ""))
@@ -3327,7 +3385,9 @@ function servicesRows(cf, st) {
     + (st.cloud_sync ? `<br>${esc(st.cloud_sync)}` : "");
   // 说明都按「谁的 · 用的什么 · 状态」排
   const map = osm ? tr("OpenStreetMap · 免费，不用 Key") : [mapOfficial ? tr("官方") : tr("自己的"), tr("高德地图"), mapOfficial ? officialDesc(L.map, calls) : amap].filter(Boolean).join(" · ");
-  return setRow(tr("录音转写"), asr, smallBtn("c-asr", tr("更改"))) + setRow(tr("地图"), map, smallBtn("c-amap", tr("更改")));
+  const login = L.error && (asrOfficial || (mapOfficial && !osm)) ? smallBtn("ac-login", tr("登录")) : "";
+  const btns = (id) => `<span class="btns">${login}${smallBtn(id, tr("更改"))}</span>`;
+  return setRow(tr("录音转写"), asr, asrOfficial ? btns("c-asr") : smallBtn("c-asr", tr("更改"))) + setRow(tr("地图"), map, !asrOfficial && mapOfficial && !osm ? btns("c-amap") : smallBtn("c-amap", tr("更改")));
 }
 
 async function renderSettings() {
@@ -3348,7 +3408,7 @@ async function renderSettings() {
     tab === "data" ? call("list_devices").catch(() => []) : DS.devs,
   ]);
   S.sync = sy; S.profile = prof; S.status = st0; S.update = up;
-  if (tab === "data") { DS.devs = devs; DS.names = Object.fromEntries((devs || []).filter((d) => d.custom).map((d) => [d.id, d.name])); }
+  if (tab === "data") { DS.devs = devs; DS.names = Object.fromEntries((devs || []).map((d) => [d.id, d.name])); }
   renderSide();
   const st = S.status, cf = S.settings;
   const theme = document.documentElement.dataset.theme || "";
@@ -3445,9 +3505,10 @@ async function renderSettings() {
     on("c-model", modelDialog);
     on("c-usage", usageDialog);
     on("c-mcp", mcpDialog);
-    on("ac-login", () => loginDialog("login"));
+    on("ac-login", officialLogin);
   }
   if (tab === "phone") {
+    on("ac-login", officialLogin);
     if (mobile) bindPhone();
     on("c-asr", asrDialog);
     on("c-amap", amapDialog);
@@ -3521,24 +3582,26 @@ function storageView(d) {
   const table = (rows, cols) => `<table class="mx-table store"><thead><tr>${cols.map((c) => `<th${c[2] ? ' class="num"' : ""}>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td${c[2] ? ' class="num mono"' : ""}>${c[1](r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   const L = d.local, C = d.cloud, T = d.transcribe;
   const local = section(tr("本机存储"), setRow(tr("数据目录"), `<span class="mono">${esc((L.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span> · ${tr("共 {size}", { size: bytesText(L.total) })}`, (S.status && S.status.mobile ? "" : smallBtn("open-dir", tr("在访达中打开"))))
-    + table(L.items, [[tr("内容"), (r) => esc(r.name)], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(r.keep)]]), { aside: tr("全部数据，以这里为准") });
+    + table(L.items, [[tr("内容"), (r) => esc(trMsg(r.name))], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(trMsg(r.keep))]]), { aside: tr("全部数据，以这里为准") });
   const cloud = section(tr("同步服务存储"), C.error ? emptyInline(C.error)
     : setRow(tr("地址"), `<span class="mono">${esc(hostOf(C.server))}</span> · ${tr("共 {size}", { size: bytesText(C.total) })}`, "")
-      + table(C.items, [[tr("内容"), (r) => esc(r.name)], [tr("块数"), (r) => numText(r.count), 1], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(r.keep)]]));
+      + table(C.items, [[tr("内容"), (r) => esc(trMsg(r.name))], [tr("块数"), (r) => numText(r.count), 1], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(trMsg(r.keep))]]));
   const jobs = T.jobs ? Object.entries(T.jobs).map(([k, n]) => `${{ queued: tr("排队"), running: tr("在转"), done: tr("转好待取"), failed: tr("失败") }[k] || k} ${n}`).join(tr("、")) : "";
   const asr = section(tr("转写服务存储"), T.error ? `<p class="note" style="margin:0"><span class="mono">${esc(hostOf(T.server))}</span></p>${emptyInline(T.error)}`
-    : setRow(tr("地址"), `<span class="mono">${esc(hostOf(T.server))}</span> · ${jobs || tr("没有你的任务")} · ${tr("占 {size}", { size: bytesText(T.bytes) })}`, `<span class="note">${esc(T.keep)}</span>`));
+    : setRow(tr("地址"), `<span class="mono">${esc(hostOf(T.server))}</span> · ${jobs || tr("没有你的任务")} · ${tr("占 {size}", { size: bytesText(T.bytes) })}`, `<span class="note">${esc(trMsg(T.keep))}</span>`));
   const repo = !(d.repo || (S.settings && S.settings.repo_path)) ? "" : section(tr("人生记录仓库"), setRow(d.repo ? `<span class="mono">${esc((d.repo.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span>` : tr("没填"),
-    d.repo ? `raw/ ${tr("共 {size}", { size: bytesText(d.repo.bytes) })} · ${esc(d.repo.keep)}` : tr("日数据包和日总结的文件夹"), smallBtn("repo-edit", tr("更改"))));
+    d.repo ? `raw/ ${tr("共 {size}", { size: bytesText(d.repo.bytes) })} · ${esc(trMsg(d.repo.keep))}` : tr("日数据包和日总结的文件夹"), smallBtn("repo-edit", tr("更改"))));
   return local + cloud + asr + repo + `<p class="note">${d.at ? tr("{t} 更新", { t: hm(new Date(d.at).toISOString()) }) : ""}</p>`;
 }
 
 /** 模型：官方（按账号开通，经同步服务代调，不用填密钥）或自己的网关（地址、模型、密钥；地址和模型有默认值，密钥不预填） */
 function modelDialog() {
   const cf = S.settings, ks = cf.api_key_source;
-  let mode = cf.model_mode === "official" ? "official" : "custom", every = cf.summary_minutes || 10;
+  // 间隔没自己选过的跟着模型来源走：官方 60 分钟（省账号额度），自己的 10 分钟
+  let mode = cf.model_mode === "official" ? "official" : "custom", every = cf.summary_minutes || 10, picked = !!cf.summary_minutes_set;
+  const showEvery = (el) => el.querySelectorAll("#md-every button").forEach((x) => { const on = +x.dataset.v === every; x.classList.toggle("is-on", on); x.setAttribute("aria-selected", on); });
   const L = SS.llm || {}, mobile = !!(S.status && S.status.mobile);
-  const state = L.error ? tr("要先登录 Beayy 账号。") : L.plan === "official" ? tr("这个账号已开通。") : L.plan === "stopped" ? tr("这个账号的官方服务已停用。") : tr("这个账号还没开通。");
+  const state = L.error ? tr("要先登录 Beayy 账号。") : L.plan === "official" ? (!L.until ? tr("这个账号已开通。") : L.until < Date.now() ? tr("试用已结束，改用自己的网关。") : tr("试用到 {d}，之后改用自己的网关。", { d: mmdd(L.until) })) : L.plan === "stopped" ? tr("这个账号的官方服务已停用。") : tr("这个账号还没开通。");
   openDialog({
     title: tr("模型"), ok: tr("保存"),
     body: `<div class="mx-field"><div class="mx-seg" role="tablist" id="md-mode">${[["official", tr("官方")], ["custom", tr("自己的网关")]].map(([k, v]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div></div>
@@ -3558,16 +3621,16 @@ function modelDialog() {
         el.querySelectorAll("#md-mode button").forEach((x) => { x.classList.toggle("is-on", x === b); x.setAttribute("aria-selected", x === b); });
         el.querySelector("#md-official").hidden = mode !== "official";
         el.querySelector("#md-custom").hidden = mode !== "custom";
+        if (!picked) { every = mode === "official" ? 60 : 10; showEvery(el); }
       };
       const ev = el.querySelector("#md-every");
       if (ev) ev.onclick = (e) => {
         const b = e.target.closest("[data-v]"); if (!b) return;
-        every = +b.dataset.v;
-        ev.querySelectorAll("button").forEach((x) => { x.classList.toggle("is-on", x === b); x.setAttribute("aria-selected", x === b); });
+        every = +b.dataset.v; picked = true; showEvery(el);
       };
     },
     submit: async (el) => {
-      if (every !== (cf.summary_minutes || 10)) await saveSome({ summary_minutes: every });
+      if (picked && (every !== cf.summary_minutes || !cf.summary_minutes_set)) await saveSome({ summary_minutes: every });
       if (mode === "official") { await saveSome({ model_mode: "official" }); SS.llm = null; return renderSettings(); }
       const gw = dlgVal(el, "gw").replace(/\/+$/, ""), md = dlgVal(el, "md"), key = dlgVal(el, "key");
       if (!isUrl(gw)) throw tr("网关地址要以 https:// 开头，比如 https://api.openai.com/v1");
@@ -3743,7 +3806,7 @@ async function renderOnboarding() {
      ${permRow("full_disk_access", tr("完全磁盘访问（可选）"), `${tr("读取 iPhone 的屏幕使用时间")} · ${howto("screentime", tr("怎么设置"))}`)}`,
     `<h2>${tr("模型")}</h2><p class="ob-lead">${tr("摘要和日总结要用一个大模型。用官方的：账号开通后登录就能用，不用填；也可以填自己的网关（任何兼容 OpenAI 接口的服务）。不配也照常记录，时间线先只列用过的 app，以后在设置里改。")}</p>
      <div class="mx-seg" role="tablist" id="ob-mode" style="margin-bottom:var(--space-4)">${[["official", tr("用官方")], ["custom", tr("自己的网关")]].map(([k, v]) => `<button role="tab" aria-selected="${k === OB.mode}" class="${k === OB.mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>
-     ${OB.mode === "official" ? `<p class="note">${tr("下一步登录账号，开通后就能用")}</p>` : `<div class="stack"><div class="mx-field"><label for="ob-gw">${tr("接口地址")}</label><input class="mx-input mono" id="ob-gw" value="${esc(S.draft.gateway || "https://api.openai.com/v1")}"></div>
+     ${OB.mode === "official" ? `<p class="note">${tr("下一步注册或登录；新账号每月送 5 万 token，够试用，天天用要填自己的网关")}</p>` : `<div class="stack"><div class="mx-field"><label for="ob-gw">${tr("接口地址")}</label><input class="mx-input mono" id="ob-gw" value="${esc(S.draft.gateway || "https://api.openai.com/v1")}"></div>
        <div class="mx-field"><label for="ob-model">${tr("模型名")}</label><input class="mx-input mono" id="ob-model" value="${esc(S.draft.model_segment || "")}" placeholder="${tr("比如 gpt-4.1-mini")}"></div>
        <div class="mx-field"><label for="ob-key">${tr("密钥")}</label><input class="mx-input mono" id="ob-key" type="password" autocomplete="off" placeholder="${S.settings.has_api_key ? tr("已经存过一把，不改就留空") : "sk-…"}"></div>
        <div class="btns sync-btns"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ob-test" ${OB.busy ? "disabled" : ""}>${OB.busy ? tr("测试中…") : tr("存下并测试一下")}</button></div></div>`}`,

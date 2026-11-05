@@ -11,6 +11,7 @@
 
 pub mod cloud;
 
+use beayy_core::i18n::{tr, tr_with};
 use beayy_core::{default_root, iso, EventLog};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
@@ -229,12 +230,12 @@ impl Relay {
     /// 拉一轮：没设置服务器就什么都不做
     pub fn pull(&mut self, root: &Path) -> Result<PullNote, String> {
         let Some(server) = server() else {
-            self.last_summary = "没设置录音服务器".into();
+            self.last_summary = tr("没设置录音服务器");
             return Ok(PullNote::default());
         };
         let r = self.pull_from(root, &server);
         self.last_summary = match &r {
-            Ok(n) => format!("新增 {} 条，服务器最近一天 {}", n.added, n.latest_day.as_deref().unwrap_or("—")),
+            Ok(n) => tr_with("新增 {n} 条，服务器最近一天 {day}", &[("n", &n.added.to_string()), ("day", n.latest_day.as_deref().unwrap_or("—"))]),
             Err(e) => e.clone(),
         };
         r

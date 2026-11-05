@@ -20,14 +20,14 @@ final class DayState: ObservableObject {
     /// 标题：今天、昨天、10-16 周五
     var title: String {
         let cal = Calendar.current
-        if cal.isDateInToday(day) { return "今天" }
-        if cal.isDateInYesterday(day) { return "昨天" }
+        if cal.isDateInToday(day) { return tr("今天") }
+        if cal.isDateInYesterday(day) { return tr("昨天") }
         return DayState.label(day)
     }
 
     static func label(_ d: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
+        f.locale = Locale(identifier: I18n.chinese ? "zh_CN" : "en_US")
         f.dateFormat = "MM-dd EEE"
         return f.string(from: d)
     }
@@ -50,7 +50,7 @@ struct Line: Identifiable, Hashable {
     var isSelf: Bool { Line.isSelf(speaker) }
     static func isSelf(_ name: String) -> Bool { !name.hasPrefix("他人") && name != "未辨" }
     /// 显示的说话人：本人写「我」，别人照服务器给的（他人1、未辨）
-    static func who(_ name: String) -> String { isSelf(name) ? "我" : name }
+    static func who(_ name: String) -> String { isSelf(name) ? tr("我") : name }
 }
 
 /// 一段对话：两句之间空 3 分钟以上算另一段（同电脑上的手表页签）
@@ -163,16 +163,16 @@ struct Stay: Identifiable {
     var sinceYesterday: Bool { (visit.arrive ?? start) < start }
     /// 起止：09:20–现在；前一天到的写「昨天 20:45–08:35」
     var span: String {
-        let a = sinceYesterday ? "昨天 " + hm(visit.arrive!) : hm(start)
-        return "\(a)–\(isNow ? "现在" : hm(end))"
+        let a = sinceYesterday ? tr("昨天") + " " + hm(visit.arrive!) : hm(start)
+        return "\(a)–\(isNow ? tr("现在") : hm(end))"
     }
     /// 时间线左边那一栏
-    var startText: String { sinceYesterday ? "昨天" : hm(start) }
+    var startText: String { sinceYesterday ? tr("昨天") : hm(start) }
 }
 
 /// 说话多久：不到一分钟写秒，再长同 spanText
 func talkText(_ sec: TimeInterval) -> String {
-    sec < 60 ? "\(max(1, Int(sec.rounded()))) 秒" : spanText(sec)
+    sec < 60 ? tr("{n} 秒", ["n": "\(max(1, Int(sec.rounded())))"]) : spanText(sec)
 }
 
 extension Conversation {

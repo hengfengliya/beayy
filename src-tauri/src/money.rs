@@ -7,6 +7,7 @@
 //! - 都是读的时候现算：手改存 bills/overrides.json，你定的规则 bills/rules.json，AI 分的 bills/ai.json，改了马上生效，不碰账单本身。
 //! - 每月的「钱」总结（AI 写）存 bills/insights/YYYY-MM.md，材料只给汇总，不给逐笔流水。
 
+use beayy_core::i18n::{lang, tr, tr_with};
 use crate::bills::{self, Bill};
 use beayy_core::{data_root, default_root};
 use serde::{Deserialize, Serialize};
@@ -315,11 +316,12 @@ fn yuan(f: i64) -> String {
     format!("{:.2}", f as f64 / 100.0)
 }
 
-/// 给人看的：一万以上「14.3 万元」，以下「4,326.90 元」
+/// 给人看的：一万以上「14.3 万元」，以下「4,326.90 元」；英文界面写「¥143.2k」「¥4,326.90」
 fn money(f: i64) -> String {
     let v = f as f64 / 100.0;
+    let en = lang() == "en";
     if v.abs() >= 10000.0 {
-        return format!("{:.1} 万元", v / 10000.0);
+        return if en { format!("¥{:.1}k", v / 1000.0) } else { format!("{:.1} 万元", v / 10000.0) };
     }
     let s = format!("{:.2}", v.abs());
     let (int, dec) = s.split_at(s.len() - 3);
@@ -330,13 +332,20 @@ fn money(f: i64) -> String {
         }
         out.push(ch);
     }
-    format!("{}{out}{dec} 元", if v < 0.0 { "−" } else { "" })
+    let sign = if v < 0.0 { "−" } else { "" };
+    if en { format!("{sign}¥{out}{dec}") } else { format!("{sign}{out}{dec} 元") }
 }
 
 /// 和平均比（base：「前三个月平均」「前三个月同期平均」）：翻倍以上写「是…的 N 倍」，否则「多／少 X%」
 fn versus(cur: i64, avg: i64, base: &str) -> String {
     let r = cur as f64 / avg as f64;
-    if r >= 10.0 { format!("是{base}的 {r:.0} 倍") } else if r >= 2.0 { format!("是{base}的 {r:.1} 倍") } else { format!("比{base}{} {:.0}%", if r >= 1.0 { "多" } else { "少" }, (r - 1.0).abs() * 100.0) }
+    let base = tr(base);
+    if r >= 2.0 {
+        tr_with("是{base}的 {r} 倍", &[("base", &base), ("r", &if r >= 10.0 { format!("{r:.0}") } else { format!("{r:.1}") })])
+    } else {
+        let p = format!("{:.0}%", (r - 1.0).abs() * 100.0);
+        tr_with(if r >= 1.0 { "比{base}多 {p}" } else { "比{base}少 {p}" }, &[("base", &base), ("p", &p)])
+    }
 }
 
 /// 一个月的最后一天 YYYY-MM-DD
@@ -527,7 +536,7 @@ pub fn budget_check(text: &str, date: chrono::NaiveDate) -> Option<(String, Opti
     let upto = date.format("%Y-%m-%d").to_string();
     let vs: Vec<View> = vs.into_iter().filter(|v| v.b.time[..10] <= *upto).collect();
     let s = spent(&vs, &month, &name);
-    Some((format!("{name}这个月到今天 {} / 上限 {}", money(s), money(limit)), Some(s <= limit)))
+    Some((tr_with("{name}这个月到今天 {spent} / 上限 {limit}", &[("name", &name), ("spent", &money(s)), ("limit", &money(limit))]), Some(s <= limit)))
 }
 
 /// 日总结的一行：这一天的钱（没有账单是 None）
@@ -678,7 +687,7 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
             e.2 += 1;
         }
         if v.out > 0 {
-            let e = acct.entry(if v.account.is_empty() { "账单上没写".to_string() } else { v.account.clone() }).or_insert((0, 0, v.credit));
+            let e = acct.entry(if v.account.is_empty() { tr("账单上没写") } else { v.account.clone() }).or_insert((0, 0, v.credit));
             e.0 += v.out;
             e.1 += 1;
         }
@@ -751,7 +760,7 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
         if let Some(a) = avg(|s| s.consume).filter(|a| *a > 0) {
             let ch = (tot.consume - a) as f64 / a as f64;
             if ch.abs() >= 0.3 {
-                alerts.push(json!({"level": if ch > 0.0 { "warn" } else { "info" }, "text": format!("这个月消费 {}，{}（{}）", money(tot.consume), versus(tot.consume, a, base), money(a))}));
+                alerts.push(json!({"level": if ch > 0.0 { "warn" } else { "info" }, "text": tr_with("这个月消费 {sum}，{vs}（{avg}）", &[("sum", &money(tot.consume)), ("vs", &versus(tot.consume, a, base)), ("avg", &money(a))])}));
             }
         }
         // 消费类型：挑比前三个月平均多得最多的 3 类（多 50% 以上、多出 300 元以上）；前三个月没有的新类型 500 元以上提一句
@@ -766,14 +775,14 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
         ups.sort_by_key(|x| -x.0);
         for (_, x) in ups.iter().take(3) {
             let (f, a) = (x["fen"].as_i64().unwrap_or(0), x["avg3"].as_i64().unwrap_or(1));
-            alerts.push(json!({"level": "warn", "text": format!("{} {}，{}", x["name"].as_str().unwrap_or(""), money(f), versus(f, a, base)), "ctype": x["name"]}));
+            alerts.push(json!({"level": "warn", "text": tr_with("{name} {sum}，{vs}", &[("name", &tr(x["name"].as_str().unwrap_or(""))), ("sum", &money(f)), ("vs", &versus(f, a, base))]), "ctype": x["name"]}));
         }
         for x in by_ctype.iter().filter(|x| x["avg3"].as_i64() == Some(0) && x["fen"].as_i64().unwrap_or(0) >= 50000 && !x["name"].as_str().unwrap_or("").is_empty()).take(2) {
-            alerts.push(json!({"level": "info", "text": format!("{} {}，前三个月没有", x["name"].as_str().unwrap_or(""), money(x["fen"].as_i64().unwrap_or(0))), "ctype": x["name"]}));
+            alerts.push(json!({"level": "info", "text": tr_with("{name} {sum}，前三个月没有", &[("name", &tr(x["name"].as_str().unwrap_or(""))), ("sum", &money(x["fen"].as_i64().unwrap_or(0)))]), "ctype": x["name"]}));
         }
         let unc: Vec<&&View> = inp.iter().filter(|v| v.unsorted()).collect();
         if !unc.is_empty() {
-            alerts.push(json!({"level": "info", "text": format!("{} 笔消费没分好类，共 {}", unc.len(), money(unc.iter().map(|v| v.out).sum())), "action": "classify"}));
+            alerts.push(json!({"level": "info", "text": tr_with("{n} 笔消费没分好类，共 {sum}", &[("n", &unc.len().to_string()), ("sum", &money(unc.iter().map(|v| v.out).sum()))]), "action": "classify"}));
         }
         // 大额：比近 6 个月消费的 95% 分位高，且不少于 2000 元
         let mut recent: Vec<i64> = vs.iter().filter(|v| v.counted && v.ttype == "消费" && win.iter().any(|m| v.b.time.starts_with(m))).map(|v| v.out).collect();
@@ -782,30 +791,30 @@ fn overview(vs: &[View], month: Option<String>) -> Value {
         let mut big: Vec<&&View> = inp.iter().filter(|v| v.counted && v.ttype == "消费" && v.out >= p95).collect();
         big.sort_by_key(|v| -v.out);
         for v in big.iter().take(3) {
-            alerts.push(json!({"level": "info", "text": format!("大额：{} {}（{}）", v.who(), money(v.out), &v.b.time[5..10]), "id": v.b.id}));
+            alerts.push(json!({"level": "info", "text": tr_with("大额：{who} {sum}（{date}）", &[("who", &v.who()), ("sum", &money(v.out)), ("date", &v.b.time[5..10])]), "id": v.b.id}));
         }
         for r in &recurring {
             let name = r["name"].as_str().unwrap_or("");
             if r["rise"] == true {
-                alerts.push(json!({"level": "warn", "text": format!("固定扣费涨了：{name} 这个月 {}，之前每月约 {}", money(r["last"].as_i64().unwrap_or(0)), money(r["avg"].as_i64().unwrap_or(0))), "q": name}));
+                alerts.push(json!({"level": "warn", "text": tr_with("固定扣费涨了：{name} 这个月 {last}，之前每月约 {avg}", &[("name", name), ("last", &money(r["last"].as_i64().unwrap_or(0))), ("avg", &money(r["avg"].as_i64().unwrap_or(0)))]), "q": name}));
             } else if r["new"] == true {
-                alerts.push(json!({"level": "info", "text": format!("新出现的固定扣费：{name}，每月约 {}", money(r["avg"].as_i64().unwrap_or(0))), "q": name}));
+                alerts.push(json!({"level": "info", "text": tr_with("新出现的固定扣费：{name}，每月约 {avg}", &[("name", name), ("avg", &money(r["avg"].as_i64().unwrap_or(0)))]), "q": name}));
             }
         }
         if late_n >= 3 && late_prev.map(|p| late_n as f64 >= p as f64 * 1.5).unwrap_or(true) {
-            alerts.push(json!({"level": "warn", "text": format!("23 点以后消费 {late_n} 笔、{}{}", money(late_fen), late_prev.map(|p| if upto.is_some() { format!("，前三个月同期平均 {p} 笔") } else { format!("，前三个月平均每月 {p} 笔") }).unwrap_or_default())}));
+            alerts.push(json!({"level": "warn", "text": tr_with("23 点以后消费 {n} 笔、{sum}", &[("n", &late_n.to_string()), ("sum", &money(late_fen))]) + &late_prev.map(|p| tr_with(if upto.is_some() { "，前三个月同期平均 {p} 笔" } else { "，前三个月平均每月 {p} 笔" }, &[("p", &p.to_string())])).unwrap_or_default()}));
         }
         if let (Some(c1), Some(c0)) = (credit, credit_prev) {
             if c1 >= 0.3 && c1 - c0 >= 0.1 {
-                alerts.push(json!({"level": "warn", "text": format!("花呗、信用卡付的消费占 {}，前三个月是 {}", pct(c1), pct(c0))}));
+                alerts.push(json!({"level": "warn", "text": tr_with("花呗、信用卡付的消费占 {now}，前三个月是 {before}", &[("now", &pct(c1)), ("before", &pct(c0))])}));
             }
         }
         for b in &budgets {
             let (s, l) = (b["spent"].as_i64().unwrap_or(0), b["limit"].as_i64().unwrap_or(1));
             if s > l {
-                alerts.push(json!({"level": "warn", "text": format!("预算超了：{} 已花 {} / {}", b["name"].as_str().unwrap_or(""), money(s), money(l))}));
+                alerts.push(json!({"level": "warn", "text": tr_with("预算超了：{name} 已花 {spent} / {limit}", &[("name", b["name"].as_str().unwrap_or("")), ("spent", &money(s)), ("limit", &money(l))])}));
             } else if s as f64 >= l as f64 * 0.8 && period == this_month() {
-                alerts.push(json!({"level": "warn", "text": format!("预算快到了：{} 已花 {} / {}", b["name"].as_str().unwrap_or(""), money(s), money(l))}));
+                alerts.push(json!({"level": "warn", "text": tr_with("预算快到了：{name} 已花 {spent} / {limit}", &[("name", b["name"].as_str().unwrap_or("")), ("spent", &money(s)), ("limit", &money(l))])}));
             }
         }
     }

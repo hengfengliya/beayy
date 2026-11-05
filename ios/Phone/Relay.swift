@@ -180,7 +180,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                     try BlobFile.write(Data(contentsOf: file), to: dir.appendingPathComponent("blobs/\(device)/\(name)"))
                     self.finish(desc, ok: true, error: nil)
                 } catch {
-                    self.finish(desc, ok: false, error: "写不进 iCloud（\(error.localizedDescription)），稍后自动重传")
+                    self.finish(desc, ok: false, error: tr("写不进 iCloud（{e}），稍后自动重传", ["e": error.localizedDescription]))
                 }
             }
         case .webdav(let base, let auth):
@@ -193,7 +193,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                     task.taskDescription = desc
                     task.resume()
                 } catch {
-                    self.finish(desc, ok: false, error: "\(error.localizedDescription)，稍后自动重传")
+                    self.finish(desc, ok: false, error: tr("{e}，稍后自动重传", ["e": error.localizedDescription]))
                 }
             }
         }
@@ -220,7 +220,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 try SyncCrypto.seal(key: acct.key, device: device, name: name, plain: plain).write(to: out, options: .atomic)
             } catch {
                 release(desc)
-                DispatchQueue.main.async { self.lastError = "录音：\(seg.id) 封装没成功（\(error.localizedDescription)），先留在手机上，告诉凤梨" }
+                DispatchQueue.main.async { self.lastError = tr("录音：{id} 封装没成功（{e}），先留在手机上，告诉凤梨", ["id": seg.id, "e": error.localizedDescription]) }
                 continue
             }
             start(acct, device: device, name: name, file: out, desc: desc)
@@ -241,7 +241,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 try SyncCrypto.seal(key: acct.key, device: Config.device, name: name, plain: snap.rows).write(to: out, options: .atomic)
             } catch {
                 release(desc)
-                DispatchQueue.main.async { self.lastError = "位置：\(day) 封装没成功（\(error.localizedDescription)），先留在手机上，告诉凤梨" }
+                DispatchQueue.main.async { self.lastError = tr("位置：{day} 封装没成功（{e}），先留在手机上，告诉凤梨", ["day": day, "e": error.localizedDescription]) }
                 continue
             }
             start(acct, device: Config.device, name: name, file: out, desc: desc)
@@ -260,7 +260,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 try SyncCrypto.seal(key: acct.key, device: Config.device, name: name, plain: Health.shared.dayRows(day)).write(to: out, options: .atomic)
             } catch {
                 release(desc)
-                DispatchQueue.main.async { self.lastError = "健康：\(day) 封装没成功（\(error.localizedDescription)），先留在手机上，告诉凤梨" }
+                DispatchQueue.main.async { self.lastError = tr("健康：{day} 封装没成功（{e}），先留在手机上，告诉凤梨", ["day": day, "e": error.localizedDescription]) }
                 continue
             }
             start(acct, device: Config.device, name: name, file: out, desc: desc)
@@ -305,7 +305,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 try? fm.removeItem(at: Config.pendingDir.appendingPathComponent("\(id).json"))
                 succeeded()
             } else if let msg {
-                DispatchQueue.main.async { self.lastError = "录音：\(msg)" }
+                DispatchQueue.main.async { self.lastError = tr("录音：{msg}", ["msg": msg]) }
             }
         } else if desc.hasPrefix("places:") {
             let day = String(desc.dropFirst("places:".count))
@@ -319,7 +319,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 // 传的时候这天又有了新的一版：接着传
                 if Places.shared.pendingVisits().contains(where: { $0.dayKey == day }) { uploadPending() }
             } else if let msg {
-                DispatchQueue.main.async { self.lastError = "位置：\(msg)" }
+                DispatchQueue.main.async { self.lastError = tr("位置：{msg}", ["msg": msg]) }
             }
         } else if desc.hasPrefix("health:") {
             let day = String(desc.dropFirst("health:".count))
@@ -332,7 +332,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 succeeded()
                 if !Health.shared.pendingUploads(1).isEmpty { uploadPending() }
             } else if let msg {
-                DispatchQueue.main.async { self.lastError = "健康：\(msg)" }
+                DispatchQueue.main.async { self.lastError = tr("健康：{msg}", ["msg": msg]) }
             }
         }
         refresh()

@@ -134,7 +134,7 @@ struct RoundRecordButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(recording ? "停止录音" : "开始录音")
+        .accessibilityLabel(recording ? tr("停止录音") : tr("开始录音"))
     }
 }
 
@@ -153,7 +153,7 @@ struct PlaceStrip: View {
         let today = Calendar.current.isDateInToday(day)
         let now = Date()
         VStack(alignment: .leading, spacing: 4) {
-            row("地点") { x, w, h in
+            row(tr("地点")) { x, w, h in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2).fill(Theme.track).frame(width: today ? x(now) : w)
                     ForEach(Array(transits.enumerated()), id: \.offset) { _, t in
@@ -166,7 +166,7 @@ struct PlaceStrip: View {
                 }
             }
             if let talks {
-                row("说话") { x, w, _ in
+                row(tr("说话")) { x, w, _ in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2).fill(Theme.track).frame(width: today ? x(now) : w)
                         ForEach(Array(talks.enumerated()), id: \.offset) { _, t in
@@ -211,7 +211,7 @@ struct PlaceStrip: View {
 
 /// 时长：不到一小时写分钟，否则写 6.2h（同桌面版）
 func spanText(_ sec: TimeInterval) -> String {
-    sec < 3600 ? "\(max(1, Int((sec / 60).rounded()))) 分钟" : String(format: "%.1fh", sec / 3600)
+    sec < 3600 ? tr("{n} 分钟", ["n": "\(max(1, Int((sec / 60).rounded())))"]) : String(format: "%.1fh", sec / 3600)
 }
 
 /// 时刻 09:04

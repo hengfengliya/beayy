@@ -1502,6 +1502,8 @@ pub fn get_settings() -> Value {
         "summary_language": get("summary_language", ""),
         // 摘要间隔（分钟）：10／20／30／60，越长越省 token
         "summary_minutes": beayy_summary::Summarizer::new(default_root()).every(),
+        // 自己选过间隔没有：没选过的跟着模型来源走（官方 60、自己的 10）
+        "summary_minutes_set": s.get("summary_minutes").and_then(Value::as_i64).is_some(),
         "ui_lang": get("ui_lang", ""),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
@@ -1731,11 +1733,10 @@ fn read_devices() -> Vec<Value> {
             "events": events, "bytes": bytes,
         }));
     }
-    // iPhone、手表的编号是随机的，同类只有一台时默认名不带它
-    for kind in ["iphone", "watch"] {
+    // iPhone、手表、安卓的编号是随机的，同类只有一台时默认名不带它
+    for (kind, short) in [("iphone", "iPhone"), ("watch", "Apple Watch"), ("android", "Android")] {
         if out.iter().filter(|d| d["kind"] == kind).count() == 1 {
             let d = out.iter_mut().find(|d| d["kind"] == kind).unwrap();
-            let short = if kind == "iphone" { "iPhone" } else { "Apple Watch" };
             d["default_name"] = json!(short);
             if !d["custom"].as_bool().unwrap_or(false) {
                 d["name"] = json!(short);
@@ -1753,10 +1754,10 @@ fn read_devices() -> Vec<Value> {
 #[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn get_profile() -> Value {
     let s = read_settings_raw();
-    let email = beayy_sync::load(&beayy_core::data_root()).and_then(|a| a.email);
+    let email = beayy_sync::service(&beayy_core::data_root()).and_then(|a| a.email);
     let name = s.get("profile_name").and_then(Value::as_str).filter(|x| !x.is_empty()).map(String::from)
         .or_else(|| email.as_ref().map(|e| e.split('@').next().unwrap_or("").to_string()))
-        .unwrap_or_else(|| "我".into());
+        .unwrap_or_else(|| beayy_core::i18n::tr("我"));
     json!({"name": name, "avatar": s.get("profile_avatar").cloned().unwrap_or(Value::Null), "email": email})
 }
 
@@ -1783,7 +1784,7 @@ pub async fn save_profile(name: String, avatar: Option<String>) -> Result<(), St
     }
     let name: String = name.trim().chars().take(40).collect();
     let root = beayy_core::data_root();
-    let updated = if beayy_sync::load(&root).map(|a| a.email.is_some()).unwrap_or(false) {
+    let updated = if beayy_sync::service(&root).is_some_and(|a| a.email.is_some()) {
         beayy_sync::set_profile(&root, &name, avatar.as_deref())?
     } else {
         Utc::now().timestamp_millis()
@@ -1842,7 +1843,9 @@ pub fn set_project_domain(project: String, domain: String) -> Result<(), String>
 /// {plan: null|"official"|"stopped", month, llm: {used, quota}, asr: {used, quota}（秒）, map: {used, quota}（次）}；没登录返回 {error}
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub async fn llm_status() -> Value {
-    match beayy_sync::account(&beayy_core::data_root()) {
+    let root = beayy_core::data_root();
+    let a = if beayy_sync::load(&root).is_some() { beayy_sync::account(&root) } else { beayy_sync::service_account(&root) };
+    match a {
         Ok(a) => a.get("services").cloned().unwrap_or(json!({"plan": null})),
         Err(e) => json!({"error": e}),
     }

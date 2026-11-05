@@ -8,6 +8,7 @@ use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use beayy_core::i18n::tr;
 use windows::core::{w, Interface, GUID, HSTRING, PCWSTR};
 use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
@@ -122,7 +123,8 @@ pub fn sync_installed_version(version: &str) {
 /// 卸载（「应用和功能」里点卸载 → beayy.exe --uninstall）：问一句，删快捷方式、开机自启、卸载项，
 /// 这个进程退出后删程序（只删自己放的文件，目录空了才删，不碰别的）。数据不删
 pub fn uninstall() {
-    let ok = unsafe { MessageBoxW(None, w!("卸载 Beayy？\n记录的数据会留在这台电脑上。"), w!("卸载 Beayy"), MB_OKCANCEL | MB_ICONQUESTION) };
+    let title = HSTRING::from(tr("卸载 Beayy"));
+    let ok = unsafe { MessageBoxW(None, &HSTRING::from(tr("卸载 Beayy？\n记录的数据会留在这台电脑上。")), &title, MB_OKCANCEL | MB_ICONQUESTION) };
     if ok != IDOK {
         return;
     }
@@ -135,7 +137,7 @@ pub fn uninstall() {
     }
     let _ = delete_value(RUN_KEY, NAME);
     let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, UNINSTALL_KEY) };
-    unsafe { MessageBoxW(None, w!("Beayy 已卸载。"), w!("卸载 Beayy"), MB_OK | MB_ICONINFORMATION) };
+    unsafe { MessageBoxW(None, &HSTRING::from(tr("Beayy 已卸载。")), &title, MB_OK | MB_ICONINFORMATION) };
     if let Some(dir) = exe.parent() {
         let cmd = format!(
             "ping -n 3 127.0.0.1 >nul & del /f /q \"{0}\\beayy.exe\" \"{0}\\beayy.old.exe\" & rmdir \"{0}\"",

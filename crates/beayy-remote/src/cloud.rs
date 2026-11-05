@@ -8,6 +8,7 @@
 //! 转写服务用同步服务发的票据认账号（拿不到同步令牌）；本人声纹在 `account/voiceprint.json`，当天他人的质心存本机
 //! `<数据根>/cloud/speakers/<日>.json`，按时间顺序一段段交、带上、拿回，「他人N」在同一天里一致。
 
+use beayy_core::i18n::tr_with;
 use crate::{parse_places, parse_transcripts, Relay};
 use base64::Engine;
 use beayy_core::default_root;
@@ -43,9 +44,10 @@ pub fn transcribe_server() -> String {
         .unwrap_or_else(|| beayy_core::DEFAULT_TRANSCRIBE.to_string())
 }
 
-/// 本人在转写里的名字：设置里的 speaker_name，没填叫「我」
+/// 本人在转写里的名字：设置里的 speaker_name，没填叫「我」（英文界面叫 Me）
 pub fn speaker_name() -> String {
-    settings().get("speaker_name").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("我").chars().take(20).collect()
+    let set = settings().get("speaker_name").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+    set.unwrap_or_else(|| tr_with("我", &[])).chars().take(20).collect()
 }
 
 fn dir(root: &Path) -> PathBuf {
@@ -69,7 +71,7 @@ const LIST_OVERLAP: i64 = 10 * 60_000;
 fn list_since(root: &Path, st: &Map<String, Value>, prefix: &str) -> Result<Vec<Value>, String> {
     // 同步文件夹、iCloud、WebDAV：网盘晚到的文件修改时刻可能比游标早，不靠游标、每轮全列（列本地目录；WebDAV 有 60 秒缓存），
     // 靠下面各自记的 updated 去重
-    if beayy_sync::official_auth(root).is_none() {
+    if !beayy_sync::server_mode(root) {
         return beayy_sync::list_named(root, prefix, 0);
     }
     let since = st.get("cursors").and_then(|c| c.get(prefix)).and_then(Value::as_i64).unwrap_or(0);
@@ -111,12 +113,12 @@ pub struct CloudNote {
 
 impl CloudNote {
     pub fn summary(&self) -> String {
-        let mut s = format!("新增 {} 条", self.added);
+        let mut s = tr_with("新增 {n} 条", &[("n", &self.added.to_string())]);
         if self.transcribed > 0 {
-            s += &format!("，转写 {} 段", self.transcribed);
+            s += &tr_with("，转写 {n} 段", &[("n", &self.transcribed.to_string())]);
         }
         if self.waiting > 0 {
-            s += &format!("，还有 {} 段等转写", self.waiting);
+            s += &tr_with("，还有 {n} 段等转写", &[("n", &self.waiting.to_string())]);
         }
         if let Some(e) = self.errors.first() {
             s += &format!("；{e}");
@@ -252,7 +254,7 @@ pub fn round(relay: &mut Relay, root: &Path, budget: Duration) -> Result<CloudNo
     write_state(root, &st);
 
     // 转写要同步服务发的票据：同步文件夹、iCloud、WebDAV 没有服务器，录音这一步不做（手机在这些模式下也不传录音，留在手机上）
-    if beayy_sync::official_auth(root).is_none() {
+    if !beayy_sync::server_mode(root) {
         return Ok(note);
     }
 

@@ -4,6 +4,8 @@
 //! `<数据根>/devices/<设备>/segments/<UTC 整 10 分>/events.jsonl`，每行一个 JSON，键按字母排序，
 //! 每条带 `event_type`、`timestamp`（UTC，ISO8601 毫秒，带 Z）、`device`。只追加，不改写。
 
+pub mod i18n;
+
 use chrono::{DateTime, Timelike, Utc};
 use serde_json::{Map, Value};
 use std::fs::{self, File, OpenOptions};

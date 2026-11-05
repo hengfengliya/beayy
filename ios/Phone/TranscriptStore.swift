@@ -50,14 +50,14 @@ actor TranscriptStore {
     }
 
     private func load(_ day: Date) async throws -> (String, String?) {
-        guard let c = Account.shared.credentials else { throw ServiceError("没登录账号") }
+        guard let c = Account.shared.credentials else { throw ServiceError(tr("没登录账号")) }
         guard c.isServer else { throw ServiceError(Account.noServer) }
         var idx = loadIndex(user: c.user)
         var warning: String?
         do {
             idx = try await Self.refreshList(c, idx)
         } catch {
-            warning = "转写列表没取到（\(error.localizedDescription)），先显示手机上已有的"
+            warning = tr("转写列表没取到（{e}），先显示手机上已有的", ["e": error.localizedDescription])
         }
         let d0 = Calendar.current.startOfDay(for: day)
         let d1 = Calendar.current.date(byAdding: .day, value: 1, to: d0)!
@@ -81,7 +81,7 @@ actor TranscriptStore {
             }
         }
         merge(idx)
-        if !failed.isEmpty { warning = "有 \(failed.count) 段没取到（\(failed[0])），下拉重试" }
+        if !failed.isEmpty { warning = tr("有 {n} 段没取到（{e}），下拉重试", ["n": "\(failed.count)", "e": failed[0]]) }
         var text = keys.compactMap { try? String(contentsOf: Self.file($0), encoding: .utf8) }.joined(separator: "\n")
         // 换到同步服务以前（v1）从录音服务器读过、存在本机的那天
         if keys.isEmpty, let old = try? String(contentsOf: Self.root.appendingPathComponent("\(DayState.key(day)).jsonl"), encoding: .utf8) {
@@ -140,7 +140,7 @@ actor TranscriptStore {
 
     private static func fetch(_ c: Credentials, _ key: String) async -> Result<Data, Error> {
         let p = key.split(separator: "/", maxSplits: 1).map(String.init)
-        guard p.count == 2 else { return .failure(ServiceError("块名不对：\(key)")) }
+        guard p.count == 2 else { return .failure(ServiceError(tr("块名不对：{key}", ["key": key]))) }
         do {
             let blob = try await Account.send(c.request("v1/blob/\(p[0])/\(p[1])"))
             return .success(try SyncCrypto.open(key: c.key, device: p[0], name: p[1], blob: blob))

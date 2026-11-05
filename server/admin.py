@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """管理账号的官方服务（这台服务器上的模型、转写、地图）。账号要开通才拿得到转写、地图票据，才能用服务器配的模型。
   python admin.py list                                     所有账号：开通情况、上限、本月用量
-  python admin.py open <邮箱> [模型 token] [转写分钟] [地图次数]   开通，上限默认 0＝不限，-1＝这一项不开
+  python admin.py open <邮箱> [模型 token] [转写分钟] [地图次数]   开通（不限期），上限默认 0＝不限，-1＝这一项不开
+  python admin.py trial <邮箱> <天>                         试用期改成从现在起这么多天（0＝不限期）；没开通的按新账号的额度开通
   python admin.py stop <邮箱>                              停用
   python admin.py storage <邮箱> <MB|default>               同步空间上限：0＝不限，default＝跟 BEAYY_USER_QUOTA_MB
 Docker 里：docker compose exec -u beayy beayy-server python admin.py list
@@ -11,7 +12,7 @@ import sys
 
 import syncapi
 
-COLS = ("SELECT u.email, u.llm_plan AS plan, u.llm_quota, CASE WHEN u.asr_quota < 0 THEN -1 ELSE u.asr_quota / 60 END AS asr_quota_min, u.map_quota, "
+COLS = ("SELECT u.email, u.llm_plan AS plan, u.llm_quota, CASE WHEN u.llm_until > 0 THEN datetime(u.llm_until / 1000, 'unixepoch') END AS trial_until, CASE WHEN u.asr_quota < 0 THEN -1 ELSE u.asr_quota / 60 END AS asr_quota_min, u.map_quota, "
         "(SELECT COALESCE(SUM(used), 0) FROM usage g WHERE g.user = u.user AND g.month = ? AND g.service = 'llm') AS llm_used, "
         "(SELECT COALESCE(SUM(used), 0) FROM usage g WHERE g.user = u.user AND g.month = ? AND g.service = 'asr') / 60 AS asr_used_min, "
         "(SELECT COALESCE(SUM(used), 0) FROM usage g WHERE g.user = u.user AND g.month = ? AND g.service = 'map') AS map_used, "
@@ -21,8 +22,15 @@ COLS = ("SELECT u.email, u.llm_plan AS plan, u.llm_quota, CASE WHEN u.asr_quota 
 
 
 def set_open(c, user: str, llm: int, asr_min: int, mp: int) -> int:
-    return c.execute("UPDATE users SET llm_plan = 'official', llm_quota = ?, asr_quota = ?, map_quota = ? WHERE user = ?",
+    return c.execute("UPDATE users SET llm_plan = 'official', llm_quota = ?, asr_quota = ?, map_quota = ?, llm_until = 0 WHERE user = ?",
                      (llm, asr_min * 60, mp, user)).rowcount
+
+
+def set_trial(c, user: str, days: float) -> int:
+    until = syncapi.now_ms() + int(days * 86400 * 1000) if days > 0 else 0
+    c.execute("UPDATE users SET llm_plan = 'official', llm_quota = ?, asr_quota = -1, map_quota = -1 WHERE user = ? AND (llm_plan IS NULL OR llm_plan = '')",
+              (syncapi.NEW_USER_LLM, user))
+    return c.execute("UPDATE users SET llm_until = ? WHERE user = ?", (until, user)).rowcount
 
 
 def set_stop(c, user: str) -> int:
@@ -38,7 +46,7 @@ def set_storage(c, user: str, mb: float | None):
 
 
 def main(a: list[str]) -> int:
-    if not a or a[0] not in ("list", "open", "stop", "storage"):
+    if not a or a[0] not in ("list", "open", "stop", "storage", "trial"):
         print(__doc__)
         return 2
     syncapi.init()
@@ -66,6 +74,14 @@ def main(a: list[str]) -> int:
             print("上限写 MB 数（0＝不限）或 default")
             return 2
         print("改好了")
+        return 0
+    if a[0] == "trial":
+        try:
+            n = set_trial(c, row["user"], float(a[2]))
+        except (IndexError, ValueError):
+            print("写天数，比如 trial a@b.com 7")
+            return 2
+        print(f"改了 {n} 个账号")
         return 0
     if a[0] == "stop":
         n = set_stop(c, row["user"])

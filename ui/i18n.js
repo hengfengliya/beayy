@@ -7,8 +7,9 @@
   let pref = null;
   try { pref = localStorage.getItem("lang"); } catch (e) {}
   // 电脑（WKWebView、WebView2）报的是系统语言（10-30 在中文 Mac 上实测 zh-CN）。
-  // iPhone 的网页视图按 app 自带的语言报，外壳还没做英文前先固定中文，免得中文用户被当成英文
-  const sys = /iPhone|iPad/.test(navigator.userAgent) ? "zh-CN" : (navigator.languages && navigator.languages[0]) || navigator.language || "zh-CN";
+  // iPhone 外壳在页面加载前写好 window.__BEAYY_LANG（系统首选语言 zh 开头为 zh，否则 en，和外壳同一个判断，见 ios/Shared/I18n.swift）；
+  // 它的网页视图自己报的是 app 本地化（zh-Hans／en），系统是两者以外的语言时会退回 zh-Hans，所以先看外壳给的
+  const sys = window.__BEAYY_LANG || (navigator.languages && navigator.languages[0]) || navigator.language || "zh-CN";
   const lang = pref === "zh" || pref === "en" ? pref : /^zh/i.test(sys) ? "zh" : "en";
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   const dict = lang === "en" ? window.I18N_EN || {} : {};

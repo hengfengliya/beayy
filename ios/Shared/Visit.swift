@@ -143,6 +143,6 @@ extension Visit {
     /// 列表里显示的起止：09:12–18:40；没走写「现在」
     var span: String {
         let a = arrive.map(hm) ?? "?"
-        return "\(a)–\(depart.map(hm) ?? "现在")"
+        return "\(a)–\(depart.map(hm) ?? tr("现在"))"
     }
 }
