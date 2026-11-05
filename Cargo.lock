@@ -140,7 +140,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "beayy"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-capture",
  "beayy-core",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-capture"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-core",
  "block2",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-core"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "chrono",
  "serde",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-install"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-core",
  "windows",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-mobile"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-core",
  "beayy-remote",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-phone"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-core",
  "chrono",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-remote"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "base64 0.22.1",
  "beayy-core",
@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-setup"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-install",
  "flate2",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-summary"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "beayy-core",
  "beayy-sync",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "beayy-sync"
-version = "0.2.54"
+version = "0.2.55"
 dependencies = [
  "argon2",
  "base64 0.22.1",
