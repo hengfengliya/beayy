@@ -67,6 +67,11 @@ const LIST_OVERLAP: i64 = 10 * 60_000;
 /// 按块名前缀增量列：从上次列到的最新 updated 往回让一点开始。同步服务的 D1 按读到的行计费，
 /// 从 0 列等于每 2 分钟把整个账号的块扫一遍（10-23 起每天撞免费额度，所有账号的同步、官方服务跟着停）
 fn list_since(root: &Path, st: &Map<String, Value>, prefix: &str) -> Result<Vec<Value>, String> {
+    // 同步文件夹、iCloud、WebDAV：网盘晚到的文件修改时刻可能比游标早，不靠游标、每轮全列（列本地目录；WebDAV 有 60 秒缓存），
+    // 靠下面各自记的 updated 去重
+    if beayy_sync::official_auth(root).is_none() {
+        return beayy_sync::list_named(root, prefix, 0);
+    }
     let since = st.get("cursors").and_then(|c| c.get(prefix)).and_then(Value::as_i64).unwrap_or(0);
     beayy_sync::list_named(root, prefix, if since > 0 { (since - LIST_OVERLAP).max(1) } else { 0 })
 }
@@ -245,6 +250,11 @@ pub fn round(relay: &mut Relay, root: &Path, budget: Duration) -> Result<CloudNo
     st.insert("transcripts".into(), Value::Object(trs));
     advance(&mut st, "transcript.", &items, miss);
     write_state(root, &st);
+
+    // 转写要同步服务发的票据：同步文件夹、iCloud、WebDAV 没有服务器，录音这一步不做（手机在这些模式下也不传录音，留在手机上）
+    if beayy_sync::official_auth(root).is_none() {
+        return Ok(note);
+    }
 
     // 录音：本机记一份服务器上有哪些录音块（增量列来的并进去），没转的按时间顺序交（段 id 里是开始时刻），转好超过 7 天的删
     let mut audio = st.get("audio").and_then(Value::as_object).cloned().unwrap_or_default();

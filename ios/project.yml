@@ -35,13 +35,18 @@ targets:
     dependencies:
       - target: BeayyWatch
       - package: Sodium
-    # 苹果健康只读（Phone/Health.swift）；后台送新数据要 background-delivery
+    # 苹果健康只读（Phone/Health.swift）；后台送新数据要 background-delivery。
+    # iCloud 云盘容器 iCloud.com.fengli.beayy：不要 Beayy 账号的 iCloud 同步（Phone/ICloud.swift，Rust 的 beayy_sync::icloud_dir），
+    # 要先在开发者账号里登记这个容器、给 App ID com.fengli.beayy.ios 勾上 iCloud（CloudKit 不用）
     entitlements:
       path: Phone/BeayyPhone.entitlements
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
         com.apple.developer.healthkit.background-delivery: true
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.fengli.beayy]
+        com.apple.developer.ubiquity-container-identifiers: [iCloud.com.fengli.beayy]
+        com.apple.developer.icloud-services: [CloudDocuments]
     # 数据代码：和电脑同一份 Rust（app/mobile → libbeayy_mobile.a），每次编译前按真机／模拟器编好
     preBuildScripts:
       - name: 编 Rust 核心

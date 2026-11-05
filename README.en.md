@@ -65,7 +65,7 @@ Beayy ships a local MCP server. Connect it to Claude Code, Claude Desktop or Cur
 claude mcp add beayy -- "/Applications/Beayy.app/Contents/MacOS/beayy" --mcp
 ```
 
-The config snippet for Claude Desktop and Cursor is under Settings → Connections → Connect to AI. Tools: `list_days` (an overview of recent days), `get_day` (time spent, what you did each hour, where the time went, and the journal for a day), `search` (keyword search over the 10-minute summaries), `get_rules_and_projects`.
+The config snippet for Claude Desktop and Cursor is under Settings → AI → Connect to other AI. Tools: `list_days` (an overview of recent days), `get_day` (time spent, what you did each hour, where the time went, and the journal for a day), `search` (keyword search over the 10-minute summaries), `get_rules_and_projects`.
 
 <p align="center"><img src="docs/images/mcp.png" alt="Connect to AI" width="860"></p>
 
@@ -91,7 +91,7 @@ Either way, records are compressed and encrypted on your device before they leav
 | Health (optional) | The iPhone app reads Apple Health (sleep, steps, activity, workouts, heart rate, mood and more) read-only, and syncs it to your computer encrypted. The Today view shows last night's sleep and the day's activity; the journal leaves out details like heart rate and mood |
 | Watch (optional) | All-day Apple Watch audio, sent to a transcription service (the official one or your own) that transcribes it and separates speakers. Your computer only gets the text: who said what, and when |
 | Storage | All local, in `~/Library/Application Support/Beayy/`, one append-only file per device per 10 minutes |
-| Summaries | Each 10-minute record goes to **the model you configure** (any OpenAI-compatible API, or the official server) and the result is written back locally. Settings → Connections → Model → Usage shows the tokens spent per day |
+| Summaries | Each 10-minute record goes to **the model you configure** (any OpenAI-compatible API, or the official server) and the result is written back locally. Settings → AI → Model → Usage shows the tokens spent per day |
 | Sync (optional) | Compressed and encrypted with XChaCha20-Poly1305 on your device. Your master password never leaves the device (key derived with Argon2id); the server stores only ciphertext and a hash of the login verifier |
 
 ## Install

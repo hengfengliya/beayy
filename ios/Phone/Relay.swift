@@ -115,7 +115,9 @@ final class WatchState: ObservableObject {
 }
 
 /// iPhone → 同步服务：录音一段一块（audio.<段 id>），停留点、苹果健康一天一块（places.<日>、health.<日>），都封好再用后台 URLSession 传，
-/// app 被挂起也会传完；收到 200 才删本地文件（停留点是标记这一版已传），失败的下次再传。没登录不传，留在本地排队
+/// app 被挂起也会传完；收到 200 才删本地文件（停留点是标记这一版已传），失败的下次再传。没登录不传，留在本地排队。
+/// 不要账号的同步（ICloud.swift）：iCloud 直接写进容器里的同步文件夹，WebDAV 同样后台 PUT 到 <地址>/blobs/<设备>/<块名>；
+/// 录音只传 Beayy 服务器（转写要它发的票据），别的方式下录音留在手机上排队
 final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
     static let shared = Uploader()
     static let sessionID = "com.fengli.beayy.ios.upload"
@@ -147,7 +149,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
             // 旧版（传 hk2 录音服务器）留在后台会话里的任务不要了
             for t in tasks where !(t.taskDescription.map { $0.hasPrefix("audio:") || $0.hasPrefix("places:") || $0.hasPrefix("health:") } ?? false) { t.cancel() }
             let inflight = Set(tasks.compactMap(\.taskDescription))
-            self.queueAudio(acct, skip: inflight)
+            if acct.isServer { self.queueAudio(acct, skip: inflight) }
             self.queuePlaces(acct, skip: inflight)
             self.queueHealth(acct, skip: inflight)
             self.refresh()
@@ -164,11 +166,37 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
     private func release(_ desc: String) { lock.withLock { _ = queued.remove(desc) } }
 
     private func start(_ acct: Credentials, device: String, name: String, file: URL, desc: String) {
-        var r = acct.request("v1/blob/\(device)/\(name)", method: "PUT")
-        r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        let task = session.uploadTask(with: r, fromFile: file)
-        task.taskDescription = desc
-        task.resume()
+        switch acct.kind {
+        case .server:
+            var r = acct.request("v1/blob/\(device)/\(name)", method: "PUT")
+            r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            let task = session.uploadTask(with: r, fromFile: file)
+            task.taskDescription = desc
+            task.resume()
+        case .folder(let dir):
+            // iCloud：写进容器里的同步文件夹就算传完，iCloud 自己同步到电脑
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    try BlobFile.write(Data(contentsOf: file), to: dir.appendingPathComponent("blobs/\(device)/\(name)"))
+                    self.finish(desc, ok: true, error: nil)
+                } catch {
+                    self.finish(desc, ok: false, error: "写不进 iCloud（\(error.localizedDescription)），稍后自动重传")
+                }
+            }
+        case .webdav(let base, let auth):
+            Task {
+                do {
+                    try await WebDAV.ensureDir(base, auth, device: device)
+                    var r = try WebDAV.request(base, auth, "blobs/\(device)/\(name)", method: "PUT")
+                    r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                    let task = self.session.uploadTask(with: r, fromFile: file)
+                    task.taskDescription = desc
+                    task.resume()
+                } catch {
+                    self.finish(desc, ok: false, error: "\(error.localizedDescription)，稍后自动重传")
+                }
+            }
+        }
     }
 
     /// 录音：明文＝一行元数据 JSON＋换行＋m4a 原始字节
@@ -257,10 +285,17 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let desc = task.taskDescription else { return }
-        release(desc)
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
-        let ok = error == nil && status == 200
+        let ok = error == nil && (200..<300).contains(status)  // WebDAV 新建回 201、覆盖回 204
         let cancelled = (error as? URLError)?.code == .cancelled  // 退出登录，或旧版的任务
+        let webdav = Account.shared.credentials?.isServer == false
+        if webdav && status == 409 { WebDAV.forgetDirs() }  // 目录被删了：下次重建
+        finish(desc, ok: ok, error: ok || cancelled ? nil : netErrorText(error, status: status, service: webdav ? "WebDAV" : "同步服务", upload: true))
+    }
+
+    /// 一块传完：成功才删本地文件、记下传过的版本；失败的留着下次再传，error 是给人看的（取消的没有）
+    private func finish(_ desc: String, ok: Bool, error msg: String?) {
+        release(desc)
         let fm = FileManager.default
         if desc.hasPrefix("audio:") {
             let id = String(desc.dropFirst("audio:".count))
@@ -269,8 +304,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 try? fm.removeItem(at: Config.pendingDir.appendingPathComponent("\(id).m4a"))
                 try? fm.removeItem(at: Config.pendingDir.appendingPathComponent("\(id).json"))
                 succeeded()
-            } else if !cancelled {
-                let msg = uploadErrorText(error, status: status)
+            } else if let msg {
                 DispatchQueue.main.async { self.lastError = "录音：\(msg)" }
             }
         } else if desc.hasPrefix("places:") {
@@ -284,8 +318,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 succeeded()
                 // 传的时候这天又有了新的一版：接着传
                 if Places.shared.pendingVisits().contains(where: { $0.dayKey == day }) { uploadPending() }
-            } else if !cancelled {
-                let msg = uploadErrorText(error, status: status)
+            } else if let msg {
                 DispatchQueue.main.async { self.lastError = "位置：\(msg)" }
             }
         } else if desc.hasPrefix("health:") {
@@ -298,8 +331,7 @@ final class Uploader: NSObject, ObservableObject, URLSessionTaskDelegate {
                 if let seq { Health.shared.uploaded(day, seq: seq) }
                 succeeded()
                 if !Health.shared.pendingUploads(1).isEmpty { uploadPending() }
-            } else if !cancelled {
-                let msg = uploadErrorText(error, status: status)
+            } else if let msg {
                 DispatchQueue.main.async { self.lastError = "健康：\(msg)" }
             }
         }

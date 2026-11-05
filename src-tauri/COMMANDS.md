@@ -33,12 +33,16 @@
 | `amap_around` | `{ "lat", "lon", "radius": 150? }` | `[{id, name, type, distance, lat, lon}]` 高德附近的去处（按距离，WGS-84） |
 | `amap_search` | `{ "text", "lat"?, "lon"? }` | 同上；有位置按距离（50 公里内），没有全国按相关度 |
 | `amap_map` | `{ "points": [[lat, lon], …], "width"?, "height"? }` | `"data:image/png;base64,…"` 高德静态地图，停留点按先后编号、连线 |
-| `sync_status` | — | `{ configured, email, server, user, last, last_error, uploaded, need_login, running, shadow }` |
+| `sync_status` | — | `{ configured, mode, email, server, folder, webdav, user, last, last_error, uploaded, need_login, remote_devices, progress, running, shadow }`；`mode`＝`"server"`／`"folder"`／`"webdav"`／`"icloud"`（没开同步是 null）；`server` 只在 server 模式有；`folder` 是同步文件夹或 iCloud 的路径；`webdav` 是 WebDAV 地址 |
+| `webdav_state` | `{ "url", "user", "pass" }` | `{ ok, vault, error? }`：连不连得上、里面有没有 vault.json（有＝用加入，没有＝新开） |
+| `webdav_create` / `webdav_join` / `webdav_recover` | `{ url, user, pass, password }`（recover 另要 `code`） | create 返回恢复码，另两个 `null`。地址、用户名、密码只存进账号（钥匙串），不进设置；坚果云要用第三方应用密码 |
+| `icloud_state` | — | `{ available, path?, vault, error? }`：Mac 要 iPhone 先用过 iCloud（容器同步过来才有）；Windows、安卓 `available: false` |
+| `icloud_create` / `icloud_join` / `icloud_recover` | `{ password }`（recover 另要 `code`） | create 返回恢复码，另两个 `null` |
 | `sync_now` | — | `{ uploaded, downloaded, errors }` |
 | `account_signup` / `account_login` / `account_claim` / `account_recover` / `account_password` | 邮箱、主密码（signup 另要 invite，recover 另要 code） | signup、claim 返回恢复码 |
 | `account_info` | — | `{ user, email, session, sessions: [{id, name, device, created, last_seen}], profile: {name, avatar, updated} }` |
 | `account_remove_device` | `{ "id" }` | `null` |
-| `account_logout` / `account_recovery_code` | — | `null` ／ 恢复码 |
+| `account_logout` / `account_recovery_code` | — | `null` ／ 恢复码（account_logout 也用来退出同步文件夹、iCloud、WebDAV：本机忘掉账号，那边的数据不动） |
 | `get_profile` / `save_profile` | — ／ `{ name, avatar: data URL 或 null }` | `{ name, avatar, email }` ／ `null` |
 | `list_projects` | — | `[{ name, domain, sec, last, aliases }]` |
 | `merge_project` / `set_project_domain` | `{ from, into }` ／ `{ project, domain }` | `null` |

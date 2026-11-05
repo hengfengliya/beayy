@@ -40,7 +40,7 @@ enum Amap {
         // 电脑上选了 OpenStreetMap：手机不问高德，地名和候选由电脑取、同步过来（10-30）
         guard Account.shared.mapProvider == "amap" else { throw Failure.bad("用的是 OpenStreetMap，地名由电脑取") }
         let r: URLRequest
-        if Account.shared.amapOfficial, Account.shared.credentials != nil {
+        if Account.shared.amapOfficial, Account.shared.credentials?.isServer == true {
             // 官方服务（香港那台，到高德快），凭地图票据
             var c = URLComponents(string: "\(Account.defaultTranscribe)/v2/amap/\(path)")!
             c.queryItems = q.map { URLQueryItem(name: $0.key, value: $0.value) }

@@ -49,6 +49,7 @@ func netErrorText(_ error: Error?, status: Int, service: String = "同步服务"
     if error != nil { return "\(service)没连上\(later)" }
     switch status {
     case 401, 403:
+        if service == "WebDAV" { return "WebDAV 不认用户名或密码（改过密码？）：到「我」退出再登录，不会自己好" }
         return service == "同步服务" ? "同步服务不认这台手机的登录（在别处移除了，或改过主密码）：到「我」退出再登录，不会自己好"
             : "\(service)不认这台手机的票据\(later)"
     case 400: return "\(service)说数据格式不对，这一条不会自己好，告诉凤梨"
@@ -67,6 +68,27 @@ struct Credentials {
     var token: String
     var key: Data
 
+    /// 同步方式：Beayy 服务器；同步文件夹（手机上就是 iCloud，路径每次重新解析）；WebDAV（token 是 Basic 认证）。见 ICloud.swift
+    enum Kind {
+        case server
+        case folder(URL)
+        case webdav(base: String, auth: String)
+    }
+
+    var kind: Kind {
+        if server.hasPrefix("webdav:") { return .webdav(base: String(server.dropFirst("webdav:".count)), auth: "Basic \(token)") }
+        if server.hasPrefix("icloud:") { return .folder(ICloud.syncDir ?? URL(fileURLWithPath: String(server.dropFirst("icloud:".count)))) }
+        if server.hasPrefix("folder:") { return .folder(URL(fileURLWithPath: String(server.dropFirst("folder:".count)))) }
+        return .server
+    }
+
+    /// 登录的是 Beayy 服务器（官方或自建）：只有这样才有转写、官方地图、设备登录
+    var isServer: Bool {
+        if case .server = kind { return true }
+        return false
+    }
+
+    /// 只给服务器模式用（别的模式先看 kind）
     func request(_ path: String, method: String = "GET") -> URLRequest {
         var r = URLRequest(url: URL(string: "\(server)/\(path)")!)
         r.httpMethod = method
@@ -130,7 +152,9 @@ final class Account: ObservableObject {
         guard body.hasPrefix("beayy-sync-1:"), let raw = SyncCrypto.b64url(String(body.dropFirst("beayy-sync-1:".count))),
               let j = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let u = j["u"] as? String, let t = j["t"] as? String, let k = (j["k"] as? String).flatMap(SyncCrypto.b64url), k.count == 32 else { return nil }
-        let server = normalize(j["s"] as? String ?? defaultServer)
+        let s = j["s"] as? String ?? defaultServer
+        // 同步文件夹、iCloud、WebDAV 的 server 不是网址，原样留着
+        let server = ["folder:", "icloud:", "webdav:"].contains(where: s.hasPrefix) ? s : normalize(s)
         return (Credentials(server: server, user: u, token: t, key: k), j["e"] as? String)
     }
 
@@ -229,26 +253,47 @@ final class Account: ObservableObject {
 
     private static func json(_ d: Data) -> [String: Any] { (try? JSONSerialization.jsonObject(with: d) as? [String: Any]) ?? [:] }
 
-    /// 取一块并解开
+    /// 取一块并解开；没有抛 status 404
     func get(device: String, name: String) async throws -> Data {
         guard let c = credentials else { throw ServiceError("没登录账号") }
-        let blob = try await Self.send(c.request("v1/blob/\(device)/\(name)"))
+        let blob: Data
+        switch c.kind {
+        case .server: blob = try await Self.send(c.request("v1/blob/\(device)/\(name)"))
+        case .folder(let dir): blob = try BlobFile.read(dir.appendingPathComponent("blobs/\(device)/\(name)"))
+        case .webdav(let base, let auth): blob = try await Self.send(WebDAV.request(base, auth, "blobs/\(device)/\(name)"), service: "WebDAV")
+        }
         return try SyncCrypto.open(key: c.key, device: device, name: name, blob: blob)
     }
 
     /// 封好传一块（小的，前台传；录音和停留点走 Uploader 的后台上传）
     func put(device: String, name: String, plain: Data) async throws {
         guard let c = credentials else { throw ServiceError("没登录账号") }
-        var r = c.request("v1/blob/\(device)/\(name)", method: "PUT")
-        r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        r.httpBody = try SyncCrypto.seal(key: c.key, device: device, name: name, plain: plain)
-        _ = try await Self.send(r)
+        let sealed = try SyncCrypto.seal(key: c.key, device: device, name: name, plain: plain)
+        switch c.kind {
+        case .server:
+            var r = c.request("v1/blob/\(device)/\(name)", method: "PUT")
+            r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            r.httpBody = sealed
+            _ = try await Self.send(r)
+        case .folder(let dir):
+            try BlobFile.write(sealed, to: dir.appendingPathComponent("blobs/\(device)/\(name)"))
+        case .webdav(let base, let auth):
+            try await WebDAV.ensureDir(base, auth, device: device)
+            var r = try WebDAV.request(base, auth, "blobs/\(device)/\(name)", method: "PUT")
+            r.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            r.httpBody = sealed
+            _ = try await Self.call(r, service: "WebDAV", accept: [200, 201, 204])
+        }
     }
+
+    /// 同 Rust 的 NO_SERVER
+    static let noServer = "用的是 iCloud 或 WebDAV，没有服务器：转写、官方地图要换成服务器同步"
 
     /// 转写服务的票据（1 小时有效）：转写服务不拿同步令牌
     /// 官方服务的票据：kind＝asr（转写）或 map（地图），同步服务按那一项的开通和额度发
     func ticket(_ kind: String = "asr") async throws -> String {
         guard let c = credentials else { throw ServiceError("没登录账号") }
+        guard c.isServer else { throw ServiceError(Self.noServer) }
         // 一小时有效：快到期（5 分钟内）再取新的
         if let (t, exp) = lock.withLock({ tickets[kind] }), exp.timeIntervalSinceNow > 300 { return t }
         let d = try await Self.send(c.request("v2/ticket?for=\(kind)"))
@@ -311,7 +356,7 @@ final class Account: ObservableObject {
 
     /// 退出：服务器上注销这台的令牌，本机忘掉账号和解开的对话；没传的录音、停留点留在手机上，重新登录后接着传
     func logout() async {
-        if let c = credentials { _ = try? await Self.send(c.request("v2/sessions/self", method: "DELETE")) }
+        if let c = credentials, c.isServer { _ = try? await Self.send(c.request("v2/sessions/self", method: "DELETE")) }
         for k in ["user", "token", "key", "email", "config"] { Keychain.set(k, nil) }
         lock.withLock {
             storedCredentials = nil

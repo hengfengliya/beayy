@@ -463,6 +463,7 @@ fn main() {
             sync::sync_status, sync::sync_now,
             sync::account_signup, sync::account_login, sync::account_claim, sync::account_recover, sync::account_password,
             sync::account_info, sync::account_remove_device, sync::account_logout, sync::account_recovery_code, sync::signup_info, sync::folder_state, sync::folder_create, sync::folder_join, sync::folder_recover, sync::pick_folder,
+            sync::webdav_state, sync::webdav_create, sync::webdav_join, sync::webdav_recover, sync::icloud_state, sync::icloud_create, sync::icloud_join, sync::icloud_recover,
             update::update_status, update::update_check, update::update_apply
         ])
         .setup(|app| {

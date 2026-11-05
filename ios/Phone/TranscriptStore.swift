@@ -51,6 +51,7 @@ actor TranscriptStore {
 
     private func load(_ day: Date) async throws -> (String, String?) {
         guard let c = Account.shared.credentials else { throw ServiceError("没登录账号") }
+        guard c.isServer else { throw ServiceError(Account.noServer) }
         var idx = loadIndex(user: c.user)
         var warning: String?
         do {

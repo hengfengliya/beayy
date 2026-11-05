@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         r.deliver = deliverOwnSegment
         Places.shared.start()        // 也可能是为了送到访／位置变化拉起的，manager 要在这里就建好
         Health.shared.start()        // 也可能是苹果送新的健康数据拉起的，观察者要在这里就挂上
+        ICloud.start()               // iCloud 容器路径交给 Rust（不要账号的 iCloud 同步），盯着别的设备传来的文件下载
         Uploader.shared.uploadPending()
         Account.shared.startConfigTimer()  // 高德 Key、转写服务地址：启动时取一次，之后每小时
         beayy_start()                      // Rust 核心：账号同步（只下载）、录音和停留点，和电脑同一份代码
@@ -37,6 +38,7 @@ struct BeayyPhoneApp: App {
         }
         .onChange(of: phase) { _, p in
             if p == .active {
+                ICloud.start()  // 中途在设置里开了 iCloud 云盘
                 Uploader.shared.uploadPending()
                 Task { await Account.shared.refreshConfig() }
                 Places.shared.retryNames()  // 当时没网、高德出错没取到名的再取一次

@@ -70,6 +70,17 @@ async function call(cmd, args = {}) {
     }
     case "get_day": return (await loadMock("get_day"))[args.date] || null;
     case "daily_status": return null;
+    // 同步：换方式、新开、加入只改内存，方便在浏览器里点一遍
+    case "sync_status": return mockState.sync || loadMock("sync_status");
+    case "account_logout": mockState.sync = { configured: false }; return null;
+    case "icloud_state": return { available: true, path: "~/Library/Mobile Documents/iCloud~com~fengli~beayy/Documents", vault: false };
+    case "webdav_state": return { ok: true, vault: false };
+    case "icloud_create": case "webdav_create": case "folder_create": case "icloud_join": case "webdav_join": case "folder_join": {
+      const mode = cmd.split("_")[0];
+      mockState.sync = { configured: true, mode, folder: mode === "folder" ? "/Users/demo/OneDrive/Beayy" : null, webdav: mode === "webdav" ? args.url : null, last: new Date().toISOString() };
+      return cmd.endsWith("_create") ? "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789" : null;
+    }
+    case "account_recovery_code": return "ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-2345-6789";
     case "get_week": {
       // 样例里有这一周就用（按周一取），没有就给空的一周
       const m = addDays(args.date, -((toDate(args.date).getDay() + 6) % 7));
@@ -850,6 +861,7 @@ const MI = {
   folder: lu('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
   info: lu('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'),
   update: lu('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'),
+  user: lu('<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>'),
   quit: lu('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
 };
 
@@ -952,6 +964,7 @@ function renderMeMenu() {
   if (!menu) return;
   const st = S.status || {};
   menu.innerHTML = `<div class="mx-menu-group">${esc((S.sync && S.sync.email) || (st.device || "").replace(/^mac-/, "Mac · "))}</div>
+    <button role="menuitem" data-me="profile">${MI.user}${tr("编辑资料")}</button>
     <button role="menuitem" data-me="settings">${MI.gear}${tr("设置")}<span class="mx-menu-val">⌘,</span></button>
     ${st.paused
       ? `<button role="menuitem" data-me="resume">${MI.play}${tr("继续记录")}${st.paused_until ? `<span class="mx-menu-val">${tr("{t} 自动继续", { t: hm(st.paused_until) })}</span>` : ""}</button>`
@@ -979,8 +992,9 @@ document.getElementById("me-menu").onclick = async (e) => {
   const b = e.target.closest("[data-me]"); if (!b) return;
   toggleMe(false);
   const k = b.dataset.me;
-  if (k === "settings") location.hash = "#/settings";
-  else if (k === "devices") location.hash = "#/devices";
+  if (k === "settings") { if (S.page !== "settings") location.hash = "#/settings"; }
+  else if (k === "devices") { SS.tab = "data"; if (S.page === "settings") renderSettings(); else location.hash = "#/settings"; }
+  else if (k === "profile") profileDialog();
   else if (k === "data") call("open_data_dir");
   else if (k === "quit") call("quit_app");
   else if (k === "update") applyUpdate();
@@ -988,7 +1002,7 @@ document.getElementById("me-menu").onclick = async (e) => {
 };
 document.addEventListener("click", (e) => { if (!e.target.closest(".me-wrap")) toggleMe(false); });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") toggleMe(false);
+  if (e.key === "Escape") { toggleMe(false); if (document.getElementById("set-root") && !DLG) closeSettings(); }
   if (e.metaKey && e.key === ",") { e.preventDefault(); location.hash = "#/settings"; }
 });
 
@@ -1075,7 +1089,7 @@ async function renderToday() {
     : emptyBlock("map", past ? tr("这一天没有停留点") : tr("今天还没有停留点"));
   // 有 30 分钟以前的段还没摘要：多半是模型没配好或额度用完，说一句、给个去处
   const rawOld = tab !== "phone" && tab !== "watch" && (d.segments || []).some((s) => s.source === "raw" && Date.parse(s.end) < Date.now() - 1800e3);
-  const rawNote = rawOld ? `<p class="note raw-note">${tr("没有摘要的时段只列了用过的 app")} · <a href="#/settings" data-set-tab="connect">${tr("设置模型")}</a></p>` : "";
+  const rawNote = rawOld ? `<p class="note raw-note">${tr("没有摘要的时段只列了用过的 app")} · <a href="#/settings" data-set-tab="ai">${tr("设置模型")}</a></p>` : "";
   const timeline = shown.length ? rawNote + `<div class="tl" id="tl">${tab === "all" ? hourRows(d, items) : tab === "phone" && visits.length ? phoneByPlace(shown, visits, today) : shown.map(tlRow).join("")}</div>`
     : past ? (tab === "phone" || tab === "watch" ? emptyInline(tab === "phone" ? tr("这一天没有手机记录") : tr("这一天没有对话")) : emptyBlock("day", tr("这一天没有记录")))
     : tab === "phone" ? `<p class="mx-empty-inline">${tr("手机记录还没同步过来")}${android ? "" : ` · ${howto("screentime", tr("怎么设置"))}`}</p>`
@@ -2342,6 +2356,18 @@ function ruleDialog(r, save) {
   });
 }
 
+/** 「方向」页：你想要什么——规矩、项目（以后加待办、每天的意图）。和今天、总结、收支这些「发生了什么」分开 */
+const dirTabs = (on) => `<nav class="mx-utabs dir-tabs">${[["rules", tr("规矩")], ["projects", tr("项目")]].map(([k, v]) =>
+  `<a href="#/direction${k === "rules" ? "" : "/" + k}" class="${k === on ? "is-on" : ""}"${k === on ? ' aria-current="page"' : ""}>${v}</a>`).join("")}</nav>`;
+
+async function renderProjects() {
+  const tk = RT.seq;
+  PJ.list = await call("list_projects").catch(() => []);
+  if (stale(tk)) return;
+  $app.innerHTML = header(tr("方向")) + dirTabs("projects") + `<div class="reading">${projectsSection() || emptyInline(tr("写过几段摘要后，这里列出认出的项目"))}</div>`;
+  bindProjects();
+}
+
 async function renderRules() {
   const tk = RT.seq;
   if (!S.rules) S.rules = await call("get_rules");
@@ -2366,7 +2392,7 @@ async function renderRules() {
       </div>
       ${RS.deleting === r.id ? `<div class="mx-confirm"><div class="mx-confirm-text"><b>${tr("删除这条规矩？")}</b><span>${tr("删了找不回来。")}</span></div><button class="mx-btn mx-btn--secondary" data-act="keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger" data-act="remove">${tr("删除这条")}</button></div>` : ""}
     </div>`;
-  if (stale(tk)) return; $app.innerHTML = header(tr("规矩"), `<button class="mx-btn mx-btn--primary" id="add">${tr("加一条规矩")}</button>`)
+  if (stale(tk)) return; $app.innerHTML = header(tr("方向"), `<button class="mx-btn mx-btn--primary" id="add">${tr("加一条规矩")}</button>`) + dirTabs("rules")
     + `<div class="reading" id="rules">
       ${rules.length ? rules.map(row).join("") : emptyInline(tr("用自己的话写一条规矩，比如「21:00 以后不开电脑」"))}
     </div>`;
@@ -2397,38 +2423,6 @@ const DEV_ICON = {
 };
 const bytesText = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.round(b / 1e3) + " KB");
 const numText = (n) => Number(n || 0).toLocaleString("en-US");
-
-/** 设备页：照墨线的列表页和设置页——「设备」一组（一台一行，点进去是设备详情页）、「同步」一组（设置行）。
- *  本机缺权限时顶上一条提示 */
-async function renderDevices() {
-  const tk = RT.seq;
-  const [devs, st, sy] = await Promise.all([call("list_devices").catch(() => []), call("get_status"), call("sync_status").catch(() => ({}))]);
-  // 登录着的设备：进页面取一次，失败（没网、令牌失效）就不显示
-  if (sy.email && !sy.need_login && !DS.account) { DS.account = {}; call("account_info").then((a) => { DS.account = a; if (S.page === "devices" && !DEV.id) renderDevices(); }).catch(() => {}); }
-  S.status = st; S.sync = sy; renderSide();
-  // 没开同步时要知道选的是不是同步文件夹（「去开」指到账号页）
-  if (!sy.configured && !S.settings) { S.settings = await call("get_settings").catch(() => null); if (S.settings) S.draft = JSON.parse(JSON.stringify(S.settings)); }
-  // 登录着的设备列表也用改过的名字
-  DS.names = Object.fromEntries(devs.filter((d) => d.custom).map((d) => [d.id, d.name]));
-  DS.devs = devs;
-  const perm = st.permissions || {};
-  const me = devs.find((d) => d.this);
-  const missing = [["accessibility", tr("辅助功能")], ["input_monitoring", tr("输入监控")], ["full_disk_access", tr("完全磁盘访问")]].filter(([k]) => perm[k] === false).map(([, n]) => n);
-  const notice = me && missing.length ? `<div class="mx-notice"><span>${tr("这台电脑缺{perms}权限，记不全。", { perms: missing.join(tr("、")), n: missing.length })}</span><a class="mx-btn mx-btn--secondary mx-btn--sm" href="#/devices/${encodeURIComponent(me.id)}">${tr("去处理")}</a></div>` : "";
-  const adding = `<div class="add-dev">
-      <div class="add-opt">${DEV_ICON.iphone}<div><b>iPhone</b><span>${tr("不用装 app。iPhone 上打开 设置 → 屏幕使用时间 →「跨设备共享」，用同一个 Apple 账号，这台 Mac 就能读到。")}</span></div></div>
-      <div class="add-opt">${DEV_ICON.mac}<div><b>${tr("另一台 Mac")}</b><span>${tr("装上 Beayy，在设置里用同一个账号登录，记录就会同步过来，出现在下面的列表里。")}</span></div></div>
-      <div class="add-opt">${DEV_ICON.win}<div><b>${tr("Windows 电脑")}</b><span>${tr("装上 Windows 版，用同一个账号登录。记的内容和 Mac 一样（打字、点击、界面文字、切换程序、在不在电脑前），还在试用。")}</span></div></div>
-    </div>`;
-  const rows = devs.map((d) => `<a class="mx-row" href="#/devices/${encodeURIComponent(d.id)}"><span class="mx-row-mark">${DEV_ICON[d.kind] || DEV_ICON.mac}</span>
-      <span class="mx-row-main"><div class="mx-row-name">${esc(d.name)}${d.this ? `<span class="mx-tag">${tr("本机")}</span>` : ""}${d.synced ? `<span class="mx-tag">${tr("经同步")}</span>` : ""}</div><div class="mx-row-desc">${devStatus(d, st)}</div></span>
-      <span class="mx-row-side">${ICON.chevR}</span></a>`).join("");
-  if (stale(tk)) return; $app.innerHTML = header(tr("设备"), `<button class="mx-btn mx-btn--primary" id="add-dev">${tr("添加设备")}</button>`)
-    + `<div class="reading">${notice}<section class="mx-sec">${rows ? `<div class="mx-list">${rows}</div>` : emptyInline(tr("还没有设备"))}</section>${syncSection(sy)}</div>`;
-  document.getElementById("add-dev").onclick = () => openDialog({ title: tr("添加设备"), body: adding, cancel: tr("关闭") });
-  bindSync();
-  if (sy.running || DS.busy) pollSync();
-}
 
 /** 设备一行下面那句状态 */
 function devStatus(d, st) {
@@ -2467,9 +2461,9 @@ async function renderDevice(id, tab) {
   const [devs, st] = await Promise.all([DS.devs ? Promise.resolve(DS.devs) : call("list_devices").catch(() => []), call("get_status")]);
   S.status = st; renderSide();
   const d = devs.find((x) => x.id === id);
-  if (!d) { location.hash = "#/devices"; return; }
+  if (!d) { SS.tab = "data"; location.hash = "#/settings"; return; }
   const base = `#/devices/${encodeURIComponent(id)}`;
-  const head = `<div class="dev-detail"><a class="mx-back" href="#/devices">${ICON.chevL}${tr("设备")}</a>
+  const head = `<div class="dev-detail"><a class="mx-back" href="#/settings" data-set-tab="data">${ICON.chevL}${tr("设备")}</a>
     <div class="mx-detail"><span class="mx-detail-mark">${DEV_ICON[d.kind] || DEV_ICON.mac}</span><div class="mx-detail-main"><h1>${esc(d.name)}</h1><p>${devStatus(d, st)}${d.this ? ` · ${tr("本机")}` : ""}</p></div>
       <div class="pick"><button class="mx-btn mx-btn--secondary" id="dev-ops" aria-haspopup="menu" aria-expanded="false">${tr("操作")}${ICON.chevD}</button>
         <div class="mx-menu" role="menu" hidden><button role="menuitem" id="dev-rename">${tr("重命名")}</button></div></div></div>
@@ -2651,53 +2645,186 @@ function renameDialog(d, done) {
     title: tr("重命名设备"), ok: tr("保存"),
     body: dlgField("dev-name", tr("名称"), { value: d.custom ? d.name : "", ph: d.default_name, help: tr("清空就改回默认名字") }),
     onOpen: (el) => { el.querySelector("#dev-name").maxLength = 40; },
-    submit: async (el) => { await call("rename_device", { id: d.id, name: dlgVal(el, "dev-name") }); DS.devs = null; done ? done() : renderDevices(); },
+    submit: async (el) => { await call("rename_device", { id: d.id, name: dlgVal(el, "dev-name") }); DS.devs = null; done ? done() : renderSettings(); },
   });
 }
 
 /** 同步进行中：每 2 秒只刷新同步卡片（进度条），同步完了整页重画一次（设备列表、最近一条会变） */
 let SYNC_POLL = null;
+/** 同步进行中：设置「数据」页开着就每 2 秒重画一次（进度条、上次时间） */
 function pollSync() {
   if (SYNC_POLL) return;
-  SYNC_POLL = setTimeout(async function tick() {
+  SYNC_POLL = setTimeout(() => {
     SYNC_POLL = null;
-    if (S.page !== "devices" || DEV.id) return;
-    const sy = await call("sync_status").catch(() => null);
-    const card = document.getElementById("sync-sec");
-    if (!sy || !card) return;
-    if (!sy.running && !DS.busy) return renderDevices();
-    card.outerHTML = syncSection(sy);
-    bindSync();
-    SYNC_POLL = setTimeout(tick, 2000);
+    if (S.page === "settings" && SS.tab === "data" && !document.querySelector(".dlg-root")) renderSettings();
   }, 2000);
 }
 
-/** 多设备同步：设备页「同步」一组设置行——账号、登录着的设备（点开小弹层，可移除）、立即同步。没登录就引导登录 */
-function syncSection(sy) {
-  if (sy.shadow) return "";
-  const msg = DS.err ? `<div class="mx-field-error">${esc(DS.err)}</div>` : DS.msg ? `<p class="note">${esc(DS.msg)}</p>` : "";
-  const row = (name, desc, side) => `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${name}</div>${desc ? `<div class="mx-setting-desc">${desc}</div>` : ""}</div>${side}</div>`;
-  const wrap = (rows) => section(tr("同步"), `<div class="rows">${rows}</div>${msg}`).replace('<section class="mx-sec"', '<section class="mx-sec" id="sync-sec"');
-  const cf = S.settings || {};
-  if (!sy.configured && cf.sync_mode === "folder") return wrap(row(tr("多设备同步"), tr("同步文件夹 {p}", { p: `<span class="mono">${esc(tildePath(cf.sync_folder))}</span>` }),
-    `<span class="mx-status">${tr("没开")}</span><a class="mx-btn mx-btn--secondary mx-btn--sm" href="#/settings" data-set-tab="account">${tr("去开")}</a>`));
-  if (!sy.configured) return wrap(row(tr("多设备同步"), tr("登录后，多台设备的记录会同步"),
-    `<span class="mx-status">${tr("没登录")}</span><span class="btns"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ac-signup">${tr("注册")}</button><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ac-login">${tr("登录")}</button></span>`));
-  if (!sy.email && !sy.folder) return wrap(row(tr("多设备同步"), tr("旧版配对码账号，设好邮箱和主密码就能在别的设备登录"),
-    `<span class="mx-status mx-status--warn">${tr("要设账号")}</span><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ac-claim">${tr("设好账号")}</button>`));
-  if (sy.need_login) return wrap(row(tr("多设备同步"), tr("登录已失效，重新登录后接着同步"),
-    `<span class="mx-status mx-status--warn">${tr("要重新登录")}</span><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ac-login">${tr("重新登录")}</button>`));
-  const sessions = (DS.account && DS.account.sessions) || [];
-  const pg = sy.progress || {};
-  const busy = sy.running || DS.busy;
-  const going = busy && pg.phase && pg.total > 0;
-  const bar = going ? `<div class="sync-prog"><div class="sync-prog-text"><span>${pg.phase === "upload" ? tr("上传") : tr("下载")}</span><span class="mono">${tr("{a} / {b} 段", { a: numText(pg.done), b: numText(pg.total) })}</span></div><div class="bar"><i style="width:${Math.min(100, Math.round((pg.done / pg.total) * 100))}%"></i></div></div>` : "";
+/** 同步方式：一种一张卡片，选中的下面只放这种方式自己的东西。不同步＝没开 */
+const SYNC_WAYS = [
+  ["none", tr("不同步"), tr("只用这一台")],
+  ["icloud", "iCloud", tr("设备都是苹果的，不用注册")],
+  ["webdav", tr("网盘（WebDAV）"), tr("坚果云、NAS，安卓和 Windows 也能用")],
+  ["server", tr("Beayy 服务"), tr("邮箱登录，官方或自己部署的")],
+];
+const syncWay = (sy) => (!sy || !sy.configured ? "none" : sy.mode || (sy.folder ? "folder" : "server"));
+const wayName = (w) => (w === "folder" ? tr("同步文件夹") : (SYNC_WAYS.find(([k]) => k === w) || [])[1] || w);
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+/** 中文里夹着 iCloud、WebDAV 这类词：前后补一个空格 */
+const gap = (t) => (LANG === "zh" ? String(t).replace(/([\u4e00-\u9fff])([A-Za-z])/g, "$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g, "$1 $2") : t);
+
+/** 设置「数据」页的同步一组：方式卡片＋这种方式的状态、账号或主密码、恢复码 */
+function syncPanel(sy) {
+  if (sy.shadow) return section(tr("同步"), emptyInline(tr("测试版不同步")));
+  const mobile = !!(S.status && S.status.mobile), cur = syncWay(sy);
+  const ways = SYNC_WAYS.filter(([k]) => !(IS_ANDROID && k === "icloud"));
+  const cards = `<div class="sync-ways" role="radiogroup" aria-label="${tr("同步方式")}">${ways.map(([k, name, desc]) =>
+    `<button class="sync-way${k === cur ? " is-on" : ""}" role="radio" aria-checked="${k === cur}" data-way="${k}"><b>${name}</b><span>${desc}</span></button>`).join("")}</div>`
+    + (mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm sync-adv" data-way="folder">${cur === "folder" ? tr("在用：同步文件夹") : tr("高级：同步文件夹（OneDrive、Syncthing）")}</button>`);
+  const msg = (DS.err ? `<div class="mx-field-error">${esc(DS.err)}</div>` : "") + (DS.msg || AC.msg ? `<p class="note">${esc(DS.msg || AC.msg)}</p>` : "");
+  const btn = (id, text) => smallBtn(id, text);
+  const confirm = (go) => `<div class="btns"><button class="mx-btn mx-btn--text mx-btn--sm" id="logout-keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger mx-btn--sm" id="logout-go">${go}</button></div>`;
+  if (cur === "none") return section(tr("同步"), cards + msg);
+  // 旧版配对码账号、登录失效：先把这件事办了
+  if (cur === "server" && !sy.email) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("邮箱和主密码"), tr("旧版配对码账号，设好邮箱和主密码就能在别的设备登录"), btn("ac-claim", tr("设好账号")))}</div>` + msg);
+  if (sy.need_login) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("登录已失效"), tr("登录已失效，重新登录后接着同步"), btn("ac-login", tr("重新登录")))}</div>` + msg);
+  const pg = sy.progress || {}, busy = sy.running || DS.busy, going = busy && pg.phase && pg.total > 0;
+  const bar = going ? `<div class="sync-bar-row"><div class="sync-prog"><div class="sync-prog-text"><span>${pg.phase === "upload" ? tr("上传") : tr("下载")}</span><span class="mono">${tr("{a} / {b} 段", { a: numText(pg.done), b: numText(pg.total) })}</span></div><div class="bar"><i style="width:${Math.min(100, Math.round((pg.done / pg.total) * 100))}%"></i></div></div></div>` : "";
   const state = busy ? `<span class="mx-status">${tr("同步中…")}</span>` : sy.last_error ? `<span class="mx-status mx-status--warn">${tr("上次有错")}</span>` : `<span class="mx-status mx-status--ok">${tr("已开{last}", { last: sy.last ? tr(" · 上次 {t}", { t: whenAt(sy.last) }) : "" })}</span>`;
-  return wrap((sy.folder ? row(tr("同步文件夹"), `<span class="mono">${esc(tildePath(sy.folder))}</span>`, state) : row(tr("账号"), esc(sy.email), state))
-    + (bar ? `<div class="sync-bar-row">${bar}</div>` : "")
-    + (sy.last_error ? `<div class="mx-error">${esc(sy.last_error)}</div>` : "")
-    + (sessions.length ? row(tr("登录着的设备"), "", `<button class="mx-btn mx-btn--text mx-btn--sm" id="sess-open">${tr("{n} 台", { n: sessions.length })}${ICON.chevR}</button>`) : "")
-    + row(tr("立即同步"), DS.done ? esc(DS.done) : "", `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="sync-now" ${busy ? "disabled" : ""}>${tr("立即同步")}</button>`));
+  const target = { server: hostOf(sy.server || ""), folder: tildePath(sy.folder), webdav: hostOf(sy.webdav || "") }[cur] || "";
+  const sessions = (DS.account && DS.account.sessions) || [];
+  const leave = cur === "server"
+    ? setRow(esc(sy.email), tr("别的设备用这个邮箱登录"), AC.confirmLogout ? confirm(tr("退出登录")) : btn("ac-logout", tr("退出登录")))
+      + (sessions.length ? setRow(tr("登录着的设备"), "", `<button class="mx-btn mx-btn--text mx-btn--sm" id="sess-open">${tr("{n} 台", { n: sessions.length })}${ICON.chevR}</button>`) : "")
+    : "";
+  return section(tr("同步"), cards + `<div class="rows">`
+    + setRow(wayName(cur), `${target ? `<span class="mono">${esc(target)}</span>` : ""}${target && DS.done ? "<br>" : ""}${DS.done ? esc(DS.done) : ""}`, `<span class="btns">${state}<button class="mx-btn mx-btn--secondary mx-btn--sm" id="sync-now" ${busy ? "disabled" : ""}>${tr("立即同步")}</button></span>`)
+    + bar + (sy.last_error ? `<div class="mx-error">${esc(sy.last_error)}</div>` : "")
+    + leave
+    + setRow(tr("主密码"), cur === "server" ? tr("只在设备上用，不会发给服务器。") : gap(tr("加入同步时要输，{where}读不到内容", { where: wayName(cur) })), btn("ac-password", tr("改主密码")))
+    + setRow(tr("恢复码"), tr("忘了主密码、设备全丢了，凭它解开记录"), btn("ac-show-code", tr("查看")))
+    + `</div>` + msg);
+}
+
+/** 设置「数据」页的设备一组：一台一行，点进去是设备详情页；本机缺权限时顶上一条提示 */
+function devicesPanel(devs, st) {
+  const perm = st.permissions || {};
+  const me = devs.find((d) => d.this);
+  const missing = [["accessibility", tr("辅助功能")], ["input_monitoring", tr("输入监控")], ["full_disk_access", tr("完全磁盘访问")]].filter(([k]) => perm[k] === false).map(([, n]) => n);
+  const notice = me && missing.length ? `<div class="mx-notice"><span>${tr("这台电脑缺{perms}权限，记不全。", { perms: missing.join(tr("、")), n: missing.length })}</span><a class="mx-btn mx-btn--secondary mx-btn--sm" href="#/devices/${encodeURIComponent(me.id)}">${tr("去处理")}</a></div>` : "";
+  const rows = devs.map((d) => `<a class="mx-row" href="#/devices/${encodeURIComponent(d.id)}"><span class="mx-row-mark">${DEV_ICON[d.kind] || DEV_ICON.mac}</span>
+      <span class="mx-row-main"><div class="mx-row-name">${esc(d.name)}${d.this ? `<span class="mx-tag">${tr("本机")}</span>` : ""}${d.synced ? `<span class="mx-tag">${tr("经同步")}</span>` : ""}</div><div class="mx-row-desc">${devStatus(d, st)}</div></span>
+      <span class="mx-row-side">${ICON.chevR}</span></a>`).join("");
+  return section(tr("设备"), notice + (rows ? `<div class="mx-list">${rows}</div>` : emptyInline(tr("还没有设备"))),
+    { aside: `<button class="mx-btn mx-btn--text mx-btn--sm" id="add-dev">${tr("添加设备")}</button>` });
+}
+
+/** 添加设备：怎么加入跟着现在的同步方式说 */
+function addDeviceDialog() {
+  const way = syncWay(S.sync);
+  const join = { none: tr("先在这里选一种同步方式，那台设备上选同一种"), icloud: tr("登同一个 Apple ID，在设置 → 数据里选 iCloud，输主密码"),
+    webdav: tr("在设置 → 数据里选网盘，填同一个地址和主密码"), server: tr("用同一个账号登录"), folder: tr("选同一个同步文件夹，输主密码") }[way];
+  const phoneOk = way !== "folder";
+  const opt = (icon, name, text) => `<div class="add-opt">${icon}<div><b>${name}</b><span>${text}</span></div></div>`;
+  openDialog({
+    title: tr("添加设备"), cancel: tr("关闭"), ok: null,
+    body: `<div class="add-dev">`
+      + opt(DEV_ICON.iphone, tr("iPhone 和手表"), phoneOk ? tr("从 TestFlight 装 Beayy，{join}。停留点、苹果健康、手表录音从这里来", { join }) : tr("同步文件夹到不了手机，要换成 iCloud、网盘或 Beayy 服务"))
+      + (IS_WIN ? "" : opt(DEV_ICON.iphone, tr("只看 iPhone 用了哪些 app"), tr("不用装 app：iPhone 和这台 Mac 都打开 设置 → 屏幕使用时间 →「跨设备共享」，用同一个 Apple 账号")))
+      + opt(DEV_ICON.mac, tr("另一台电脑"), tr("装 Mac 版或 Windows 版，{join}", { join }))
+      + opt(DEV_ICON.iphone, tr("安卓手机"), way === "icloud" || way === "folder" ? gap(tr("安卓用不了{way}，要换成网盘或 Beayy 服务", { way: wayName(way) })) : tr("装安卓版（预览），{join}", { join }))
+      + `</div>`,
+  });
+}
+
+/** 点一张同步方式卡片：开着别的先确认停掉（不同步＝停掉），再接着设新的 */
+function pickWay(way) {
+  const cur = syncWay(S.sync);
+  if (way === cur) return;
+  if (cur === "none") return setupWay(way);
+  openDialog({
+    title: way === "none" ? tr("停止同步？") : gap(tr("换成{way}？", { way: wayName(way) })),
+    body: `<p class="note">${gap(tr("先停掉现在的{cur}。这台的记录不受影响，{cur}里已有的也还在。", { cur: wayName(cur) }))}</p>`,
+    ok: way === "none" ? tr("停止同步") : tr("停掉并换"), okClass: way === "none" ? "danger" : "primary", busy: tr("处理中…"),
+    submit: async () => {
+      await call("account_logout");
+      DS.account = null; DS.done = DS.err = DS.msg = AC.msg = null; AC.confirmLogout = false;
+      await renderSettings();
+      if (way !== "none") setTimeout(() => setupWay(way));
+    },
+  });
+}
+
+async function setupWay(way) {
+  if (way === "server") {
+    if (S.settings.sync_mode === "folder") await saveSome({ sync_mode: "server" });
+    return loginDialog("login");
+  }
+  if (way === "folder") return folderPickDialog();
+  if (way === "webdav") return webdavDialog();
+  let s;
+  try { s = await call("icloud_state"); } catch (x) { s = { available: false, error: String(x) }; }
+  if (!s.available) return openDialog({ title: "iCloud", cancel: tr("关闭"), ok: null, body: `<p class="note">${esc(s.error || tr("这台设备没登录 iCloud，或者没打开 iCloud 云盘。打开后再选一次。"))}</p>` });
+  vaultDialog(s.vault ? "join" : "create", "icloud");
+}
+
+/** 网盘（WebDAV）：地址、账号、密码，连得上再新开或加入 */
+function webdavDialog() {
+  openDialog({
+    title: tr("网盘（WebDAV）"), ok: tr("下一步"), busy: tr("连接中…"),
+    body: dlgField("dv-url", tr("地址"), { mono: true, ph: "https://dav.jianguoyun.com/dav/Beayy", help: tr("每台设备填同一个地址，最好是单独的文件夹") })
+      + dlgField("dv-user", tr("账号"), { ph: tr("网盘的登录邮箱或用户名") })
+      + dlgField("dv-pass", tr("密码"), { type: "password", help: tr("坚果云要用「第三方应用管理」里生成的应用密码") }),
+    submit: async (el) => {
+      const cred = { url: dlgVal(el, "dv-url").replace(/\/+$/, ""), user: dlgVal(el, "dv-user"), pass: el.querySelector("#dv-pass").value };
+      if (!isUrl(cred.url)) throw tr("地址要以 https:// 开头。");
+      if (!cred.user || !cred.pass) throw tr("账号和密码都要填。");
+      const s = await call("webdav_state", cred);
+      if (!s.ok) throw s.error || tr("连不上这个地址");
+      setTimeout(() => vaultDialog(s.vault ? "join" : "create", "webdav", cred));
+    },
+  });
+}
+
+/** 同步文件夹（高级，只有电脑）：选一个网盘会同步的文件夹，每台电脑选同一个 */
+function folderPickDialog() {
+  const cf = S.settings;
+  openDialog({
+    title: tr("同步文件夹"), ok: tr("下一步"),
+    body: `<div class="mx-field"><label for="sf">${tr("文件夹")}</label><div class="inline"><input class="mx-input mono" id="sf" value="${esc(cf.sync_folder || "")}" placeholder="${esc(cf.icloud_folder || "")}"><button class="mx-btn mx-btn--secondary" id="sf-pick" type="button">${tr("选择…")}</button></div></div>
+      <p class="note">${tr("选 OneDrive、Dropbox、Syncthing 或 NAS 会同步的文件夹，每台电脑选同一个。手机用不了")}</p>`,
+    onOpen: (el, d) => { el.querySelector("#sf-pick").onclick = async () => { try { const p = await call("pick_folder"); if (p) el.querySelector("#sf").value = p; } catch (x) { d.setErr(String(x)); } }; },
+    submit: async (el) => {
+      const f = dlgVal(el, "sf") || cf.icloud_folder;
+      if (!f) throw tr("选一个文件夹。");
+      await saveSome({ sync_mode: "folder", sync_folder: f });
+      const s = await call("folder_state").catch(() => ({}));
+      setTimeout(() => vaultDialog(s.vault ? "join" : "create", "folder"));
+    },
+  });
+}
+
+/** 设置「数据」页的交互：方式卡片、立即同步、账号和主密码、设备、存储 */
+function bindData(sy) {
+  const on = (id, f) => { const el = document.getElementById(id); if (el) el.onclick = f; };
+  document.querySelectorAll("[data-way]").forEach((b) => (b.onclick = () => pickWay(b.dataset.way)));
+  on("ac-login", () => loginDialog("login"));
+  on("ac-claim", claimDialog);
+  on("sess-open", sessionsDialog);
+  on("ac-password", passwordDialog);
+  on("ac-show-code", async () => { try { codeDialog(await call("account_recovery_code"), false); } catch (x) { AC.msg = tr("取不到恢复码：{e}", { e: x }); renderSettings(); } });
+  on("ac-logout", () => { AC.confirmLogout = true; renderSettings(); });
+  on("logout-keep", () => { AC.confirmLogout = false; renderSettings(); });
+  on("logout-go", async () => { await call("account_logout"); AC.confirmLogout = false; AC.msg = null; DS.account = null; DS.done = null; renderSettings(); });
+  on("sync-now", async () => {
+    DS.busy = true; DS.err = DS.msg = DS.done = null; renderSettings();
+    try { const r = await call("sync_now"); DS.done = tr("{t} 上传 {up} 段，下载 {down} 段{err}", { t: hm(new Date().toISOString()), up: r.uploaded, down: r.downloaded, err: r.errors.length ? tr("，有错：{e}", { e: r.errors.join(tr("；")) }) : "" }); } catch (x) { DS.err = String(x); }
+    DS.busy = false; renderSettings();
+  });
+  on("add-dev", addDeviceDialog);
+  // 登录着的设备：进这一页取一次，失败（没网、令牌失效）就不显示
+  if (syncWay(sy) === "server" && sy.email && !sy.need_login && !DS.account) { DS.account = {}; call("account_info").then((a) => { DS.account = a; if (S.page === "settings" && SS.tab === "data") renderSettings(); }).catch(() => {}); }
+  if (sy.running || DS.busy) pollSync();
 }
 
 /** 登录着这个账号的设备（小弹层）：这台标出来，别的可以移除（先点「移除」，再点一次确认） */
@@ -2719,22 +2846,12 @@ function sessionsDialog() {
         el.querySelectorAll("[data-sess-go]").forEach((b) => (b.onclick = async () => {
           try { await call("account_remove_device", { id: b.dataset.sessGo }); DS.account = await call("account_info").catch(() => DS.account); DS.msg = tr("已移除，那台设备要重新登录"); }
           catch (x) { DS.err = String(x); }
-          removing = null; draw(); if (S.page === "devices" && !DEV.id) renderDevices();
+          removing = null; draw(); if (S.page === "settings") renderSettings();
         }));
       };
       bind();
     } });
   return d;
-}
-
-function bindSync() {
-  const on = (id, f) => { const el = document.getElementById(id); if (el) el.onclick = f; };
-  on("ac-login", () => loginDialog("login"));
-  on("ac-signup", () => loginDialog("signup"));
-  on("ac-claim", claimDialog);
-  on("sess-open", sessionsDialog);
-  $app.querySelectorAll("[data-set-tab]").forEach((a) => (a.onclick = () => { SS.tab = a.dataset.setTab; try { localStorage.setItem("settings-tab", SS.tab); } catch (x) {} }));
-  on("sync-now", async () => { DS.busy = true; DS.err = DS.msg = DS.done = null; renderDevices(); try { const r = await call("sync_now"); DS.done = tr("{t} 上传 {up} 段，下载 {down} 段{err}", { t: hm(new Date().toISOString()), up: r.uploaded, down: r.downloaded, err: r.errors.length ? tr("，有错：{e}", { e: r.errors.join(tr("；")) }) : "" }); } catch (x) { DS.err = String(x); } DS.busy = false; renderDevices(); });
 }
 
 // ---------- 设置 ----------
@@ -2887,7 +3004,7 @@ function projectsSection() {
   const rows = byDom.map(([d, xs]) => `<div class="pj-group">${tr(d)}</div>` + xs.map((p) => `<div class="pj-row" data-p="${esc(p.name)}">
       <div class="pj-main"><div class="mx-setting-name">${esc(p.name)}</div><div class="mx-setting-desc">${tr("累计 {d}{a}", { d: dur(p.sec), a: p.aliases.length ? tr(" · 也叫 {x}", { x: esc(p.aliases.join(tr("、"))) }) : "" })}</div></div>
       <button class="mx-btn mx-btn--text mx-btn--sm" data-pj-edit>${tr("编辑")}</button></div>`).join("")).join("");
-  return section(tr("项目"), `<p class="note">${tr("项目由摘要自动判断，你改过的不会被覆盖")}</p><div class="pj">${rows}</div>${PJ.err ? `<div class="mx-field-error">${esc(PJ.err)}</div>` : ""}`);
+  return `<p class="note pj-note">${tr("项目由摘要自动判断，你改过的不会被覆盖")}</p><div class="pj">${rows}</div>${PJ.err ? `<div class="mx-field-error">${esc(PJ.err)}</div>` : ""}`;
 }
 
 /** 编辑一个项目（小弹层）：改领域，或者合并到另一个项目 */
@@ -2920,7 +3037,7 @@ function projectDialog(p) {
       if (into) await call("merge_project", { from: p.name, into });
       else if (domain !== p.domain) await call("set_project_domain", { project: p.name, domain });
       else return;
-      PJ.err = null; PJ.list = await call("list_projects"); renderSettings();
+      PJ.err = null; renderProjects();
     },
   });
 }
@@ -2931,35 +3048,6 @@ function bindProjects() {
 
 /** 账号：msg＝页面上留一句结果；confirmLogout＝退出登录等确认。登录、注册、改密码这些都在小弹层里 */
 const AC = { msg: null, confirmLogout: false };
-
-function accountSection(sy) {
-  return section(tr("账号"), profileRow() + accountBody(sy));
-}
-
-function accountBody(sy) {
-  const msg = AC.msg ? `<p class="note ac-msg">${esc(AC.msg)}</p>` : "";
-  const row = (name, desc, right) => `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${name}</div><div class="mx-setting-desc">${desc}</div></div>${right}</div>`;
-  const btn = (id, text) => `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="${id}">${text}</button>`;
-  // 同步文件夹：没有邮箱，靠文件夹＋主密码；第一台「新开」，别的「加入」
-  if (sy.configured && sy.folder) return row(tr("同步文件夹"), tr("{p} · 别的设备选同一个文件夹、输主密码加入", { p: `<span class="mono">${esc(tildePath(sy.folder))}</span>` }),
-      AC.confirmLogout ? `<div class="btns"><button class="mx-btn mx-btn--text mx-btn--sm" id="logout-keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger mx-btn--sm" id="logout-go">${tr("停止同步")}</button></div>` : btn("ac-logout", tr("停止同步")))
-    + row(tr("主密码"), tr("加密写进文件夹的数据用它解开，网盘读不到内容。"), btn("ac-password", tr("改主密码")))
-    + row(tr("恢复码"), tr("忘了主密码时用它重设。"), btn("ac-show-code", tr("查看"))) + msg;
-  const cf = S.settings || {};
-  if (!sy.configured && cf.sync_mode === "folder") {
-    const fs = AC.folder || {};
-    return row(tr("同步文件夹"), `<span class="mono">${esc(tildePath(cf.sync_folder))}</span><br>${tr("{s} · 在「连接 → 同步方式」里换", { s: fs.vault ? tr("里面已经开过同步：输主密码加入") : tr("第一台设备在这里新开同步，别的设备再加入") })}`,
-      `<div class="btns">${fs.vault ? btn("fd-join", tr("加入")) : btn("fd-create", tr("新开同步"))}</div>`) + msg;
-  }
-  if (sy.configured && sy.email && !sy.need_login) return row(esc(sy.email), tr("别的设备用这个邮箱登录"),
-      AC.confirmLogout ? `<div class="btns"><button class="mx-btn mx-btn--text mx-btn--sm" id="logout-keep">${tr("取消")}</button><button class="mx-btn mx-btn--danger mx-btn--sm" id="logout-go">${tr("退出登录")}</button></div>` : btn("ac-logout", tr("退出登录")))
-    + row(tr("主密码"), tr("只在设备上用，不会发给服务器。"), btn("ac-password", tr("改主密码")))
-    + row(tr("恢复码"), tr("忘了主密码时用它重设。"), btn("ac-show-code", tr("查看"))) + msg;
-  if (sy.configured && !sy.email) return row(tr("邮箱和主密码"), tr("旧版配对码账号，设好邮箱和主密码就能在别的设备登录"), btn("ac-claim", tr("设好账号"))) + msg;
-  return row(sy.need_login ? tr("登录已失效") : tr("没登录"),
-    sy.need_login ? tr("登录已失效，重新登录后接着同步") : tr("登录后，多台设备的记录会同步"),
-    `<div class="btns">${sy.need_login ? "" : btn("ac-signup", tr("注册"))}${btn("ac-login", sy.need_login ? tr("重新登录") : tr("登录"))}</div>`) + msg;
-}
 
 const checkEmail = (e) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw tr("邮箱格式不对。");
@@ -2974,7 +3062,7 @@ const checkPw = (el) => {
   return a;
 };
 /** 账号变了：登录着的设备列表重取，当前页重画（设置页和设备页都能开这些弹层） */
-const accountChanged = () => { DS.account = null; return S.page === "devices" ? renderDevices() : renderSettings(); };
+const accountChanged = () => { DS.account = null; return renderSettings(); };
 
 /** 登录、注册、用恢复码重设（小弹层，底下可以互相切换） */
 function loginDialog(mode = "login", email = "") {
@@ -3057,40 +3145,28 @@ function codeDialog(code, fresh) {
   });
 }
 
-/** 同步文件夹：新开（设主密码，给恢复码）、加入（输主密码）、用恢复码重设 */
-function folderDialog(mode) {
+/** 不经服务器的同步（iCloud、网盘、同步文件夹）：第一台新开（设主密码，给恢复码）、别的加入（输主密码）、用恢复码重设。
+ *  命令按方式取名：folder_create、icloud_join、webdav_recover…；网盘另带地址、账号、密码 */
+function vaultDialog(mode, way, cred = {}) {
+  const where = wayName(way);
   const forms = {
-    create: [tr("新开同步"), `<p class="note">${tr("记录加密后写进这个文件夹，交给网盘同步；主密码用来解开，别的设备加入时要输")}</p>` + dlgField("pw1", tr("主密码"), { type: "password", ph: tr("至少 8 位，记得住又别人猜不到") }) + dlgField("pw2", tr("再输一次"), { type: "password" }), tr("新开同步")],
-    join: [tr("加入同步"), `<p class="note">${tr("输这个文件夹的主密码（在第一台设备上设的）")}</p>` + dlgField("pw1", tr("主密码"), { type: "password" }), tr("加入")],
+    create: [gap(tr("在{where}新开同步", { where })), `<p class="note">${gap(tr("记录加密后放进{where}，{where}读不到内容。主密码用来解开，别的设备加入时要输", { where }))}</p>` + dlgField("pw1", tr("主密码"), { type: "password", ph: tr("至少 8 位，记得住又别人猜不到") }) + dlgField("pw2", tr("再输一次"), { type: "password" }), tr("新开同步")],
+    join: [gap(tr("加入{where}里的同步", { where })), `<p class="note">${tr("输第一台设备上设的主密码")}</p>` + dlgField("pw1", tr("主密码"), { type: "password" }), tr("加入")],
     recover: [tr("用恢复码重设主密码"), `<p class="note">${tr("重设后，别的设备下次加入用新主密码")}</p>` + dlgField("rc", tr("恢复码"), { ph: "XXXX-XXXX-…", mono: true }) + dlgField("pw1", tr("新主密码"), { type: "password", ph: tr("至少 8 位") }) + dlgField("pw2", tr("再输一次"), { type: "password" }), tr("重设并加入")],
   };
   const [title, body, ok] = forms[mode];
   openDialog({
     title, ok, busy: tr("处理中…"),
     body: body + (mode === "join" ? `<div class="dlg-links"><button class="mx-btn mx-btn--text mx-btn--sm" data-to="recover">${tr("忘了主密码")}</button></div>` : ""),
-    onOpen: (el) => el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => folderDialog(b.dataset.to))),
+    onOpen: (el) => el.querySelectorAll("[data-to]").forEach((b) => (b.onclick = () => vaultDialog(b.dataset.to, way, cred))),
     submit: async (el) => {
       AC.msg = null;
-      if (mode === "create") { const code = await call("folder_create", { password: checkPw(el) }); setTimeout(() => codeDialog(code, true)); }
-      else if (mode === "join") await call("folder_join", { password: el.querySelector("#pw1").value });
-      else { await call("folder_recover", { code: dlgVal(el, "rc"), password: checkPw(el) }); AC.msg = tr("已重设主密码"); }
-      AC.folder = null; accountChanged();
+      if (mode === "create") { const code = await call(`${way}_create`, { ...cred, password: checkPw(el) }); setTimeout(() => codeDialog(code, true)); }
+      else if (mode === "join") await call(`${way}_join`, { ...cred, password: el.querySelector("#pw1").value });
+      else { await call(`${way}_recover`, { ...cred, code: dlgVal(el, "rc"), password: checkPw(el) }); AC.msg = tr("已重设主密码"); }
+      accountChanged();
     },
   });
-}
-
-function bindAccount() {
-  const on = (id, f) => { const el = document.getElementById(id); if (el) el.onclick = f; };
-  on("ac-login", () => loginDialog("login"));
-  on("ac-signup", () => loginDialog("signup"));
-  on("ac-claim", claimDialog);
-  on("fd-create", () => folderDialog("create"));
-  on("fd-join", () => folderDialog("join"));
-  on("ac-password", passwordDialog);
-  on("ac-show-code", async () => { try { codeDialog(await call("account_recovery_code"), false); } catch (x) { AC.msg = tr("取不到恢复码：{e}", { e: x }); renderSettings(); } });
-  on("ac-logout", () => { AC.confirmLogout = true; renderSettings(); });
-  on("logout-keep", () => { AC.confirmLogout = false; renderSettings(); });
-  on("logout-go", async () => { await call("account_logout"); AC.confirmLogout = false; AC.msg = null; DS.account = null; renderSettings(); });
 }
 
 /** 到明早 8 点还有几分钟 */
@@ -3161,8 +3237,9 @@ function addPlaceDialog() {
 }
 
 /** 设置分六页，放在页头的页签里：通用｜账号｜记录｜连接｜数据｜项目。改了就存，不再有「保存设置」；要填几项的（地址、模型、密钥）开小弹层 */
-const SET_TABS = [["general", tr("通用")], ["account", tr("账号")], ["record", tr("记录")], ["connect", tr("连接")], ["data", tr("数据")], ["projects", tr("项目")]];
-try { SS.tab = localStorage.getItem("settings-tab") || "general"; } catch (e) { SS.tab = "general"; }
+const SET_TABS = [["general", tr("通用")], ["record", tr("记录")], ["ai", "AI"], ["phone", tr("手机与手表")], ["data", tr("数据")]];
+// 以前的分页（账号、连接、项目）记在本机的，换成现在的
+try { const t = localStorage.getItem("settings-tab") || "general"; SS.tab = { account: "data", connect: "ai", projects: "general" }[t] || t; } catch (e) { SS.tab = "general"; }
 const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return u || ""; } };
 /** 路径里的家目录写成 ~，iCloud 云盘写成「iCloud 云盘」 */
 const tildePath = (p) => String(p || "").replace(/^\/Users\/[^/]+\/Library\/Mobile Documents\/com~apple~CloudDocs/, tr("iCloud 云盘")).replace(/^\/Users\/[^/]+/, "~");
@@ -3177,21 +3254,85 @@ async function saveSome(part) {
 const isUrl = (v) => /^https?:\/\/\S+$/.test(v);
 const KEEP = tr("已存，留空不改");
 
+/** 设置：电脑上是盖在当前页上的大弹层（照 Claude），关掉回到原来那页；手机（窄屏）还是整页 */
+const SET = { back: "#/today" };
+const setModal = () => !NARROW.matches && !(S.status && S.status.mobile);
+function setHost() {
+  if (!setModal()) return $app;
+  let root = document.getElementById("set-root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "set-root"; root.className = "mx-scrim set-root";
+    root.innerHTML = `<div class="mx-dialog set-dialog" role="dialog" aria-modal="true" aria-labelledby="set-title">
+      <div class="mx-dialog-head"><h2 id="set-title">${tr("设置")}</h2><button class="mx-iconbtn" id="set-close" aria-label="${tr("关闭")}">${ICON.close}</button></div>
+      <div class="mx-dialog-body" id="set-body"></div></div>`;
+    document.body.appendChild(root);
+    root.addEventListener("mousedown", (e) => { if (e.target === root) closeSettings(); });
+    root.querySelector("#set-close").onclick = closeSettings;
+  }
+  return root.querySelector("#set-body");
+}
+function closeSettings() { location.hash = SET.back || "#/today"; }
+function dropSettings() { const r = document.getElementById("set-root"); if (r) r.remove(); }
+
+const tokText = (n) => (n >= 1e4 ? tr("{n} 万 token", { n: numText(Math.round(n / 1e4)), k: numText(Math.round(n / 1e3)) }) : tr("{n} token", { n: numText(n) }));
+/** 官方的某一项（模型、转写、地图）现在怎样：要登录、没开通，或者本月用了多少（上限 0＝不限，负数＝这一项没开） */
+function officialDesc(u, fmt) {
+  const L = SS.llm, way = syncWay(S.sync);
+  if (way !== "none" && way !== "server") return tr("官方的要用 Beayy 服务同步");
+  if (!L) return "";
+  if (L.error) return tr("要登录 Beayy 账号");
+  if (L.plan === "stopped") return tr("已停用");
+  if (L.plan !== "official") return tr("这个账号没开通");
+  const q = (u && u.quota) || 0;
+  return q < 0 ? tr("这一项没开通") : tr("本月 {u} / {q}", { u: fmt((u && u.used) || 0), q: q ? fmt(q) : tr("不限") });
+}
+
+/** 设置「AI」页：写总结用的模型（本月用量写在这一行）、语言、棒喝；接到别的 AI */
+function aiBody(cf, st) {
+  const mobile = !!st.mobile, official = cf.model_mode === "official", ks = cf.api_key_source;
+  const used30 = SS.usage && !SS.usage.error ? (SS.usage.days || []).reduce((a, d) => a + d.in + d.out, 0) : null;
+  const model = official ? [tr("官方"), officialDesc(SS.llm && SS.llm.llm, tokText)].filter(Boolean).join(" · ")
+    : `${tr("自己的网关")} · <span class="mono">${esc(hostOf(cf.gateway))} · ${esc(cf.model_segment || tr("没填模型"))}</span> · ${ks ? tr("密钥已存") : tr("没有密钥")}${used30 != null ? ` · ${tr("近 30 天 {n}", { n: tokText(used30) })}` : ""}`;
+  const login = official && SS.llm && SS.llm.error && ["none", "server"].includes(syncWay(S.sync)) ? smallBtn("ac-login", tr("登录")) : "";
+  const seg = (id, list, cur) => `<div class="mx-seg" role="tablist" id="${id}">${list.map(([k, v]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
+  return section(tr("写总结"), setRow(tr("模型"), model, `<span class="btns">${mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm" id="c-usage">${tr("用量")}</button>`}${login}${smallBtn("c-model", tr("设置"))}</span>`)
+      + setRow(tr("总结的语言"), "", seg("sum-lang", SUM_LANGS, cf.summary_language || ""))
+      + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), seg("roast", ROASTS, cf.roast || "off")))
+    + (mobile ? "" : section(tr("接到别的 AI"), setRow("Claude、Cursor", tr("让本机的 AI 读你的记录，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
+}
+
+/** 设置「手机与手表」页的服务：手表录音转文字、停留点取名用的地图（用官方的写本月用量） */
+function servicesRows(cf, st) {
+  const asrOfficial = cf.transcribe_server === cf.default_transcribe_server, mapOfficial = cf.map_mode === "official", osm = cf.map_provider === "osm";
+  const L = SS.llm || {};
+  const amap = cf.has_amap_key && cf.has_amap_js ? tr("Key 已存") : cf.has_amap_key ? tr("缺地图 Key") : tr("还没有 Key");
+  const minutes = (sec) => tr("{n} 分钟", { n: numText(Math.round(sec / 60)) }), calls = (n) => tr("{n} 次", { n: numText(n) });
+  const asr = [asrOfficial ? tr("官方") : `${tr("自建")} · <span class="mono">${esc(hostOf(cf.transcribe_server))}</span>`, asrOfficial ? officialDesc(L.asr, minutes) : "", tr("你叫「{name}」", { name: esc(cf.speaker_name) })].filter(Boolean).join(" · ")
+    + (st.cloud_sync ? `<br>${esc(st.cloud_sync)}` : "");
+  const map = osm ? tr("OpenStreetMap · 免费，不用 Key") : [tr("高德地图"), mapOfficial ? tr("官方") : `${tr("自己的 Key")} · ${amap}`, mapOfficial ? officialDesc(L.map, calls) : ""].filter(Boolean).join(" · ");
+  return setRow(tr("转写服务"), asr, smallBtn("c-asr", tr("设置"))) + setRow(tr("地图"), map, smallBtn("c-amap", tr("设置")));
+}
+
 async function renderSettings() {
+  // 弹层里的操作（登录、改资料）完了会叫它；已经不在设置了就不画
+  if (S.page !== "settings") return;
   const tk = RT.seq;
   if (!S.settings) { S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings)); }
+  const mobile = !!(S.status && S.status.mobile);
   // 手机版不采集：没有「记录」页（暂停、不记录的 app、删最近记录都是电脑上的事）
-  const tabsHere = S.status && S.status.mobile ? SET_TABS.filter(([k]) => k !== "record") : SET_TABS;
+  const tabsHere = mobile ? SET_TABS.filter(([k]) => k !== "record") : SET_TABS;
   const tab = tabsHere.some(([k]) => k === SS.tab) ? SS.tab : "general";
   // 几样互不相干，一起问（原来一个等一个）
-  const [sy, pj, prof, st0, up] = await Promise.all([
+  const [sy, prof, st0, up, devs] = await Promise.all([
     call("sync_status").catch(() => ({})),
-    tab === "projects" && !PJ.list ? call("list_projects").catch(() => []) : PJ.list,
     call("get_profile").catch(() => S.profile),
     call("get_status"),
     TAURI ? call("update_status").catch(() => S.update) : S.update,
+    tab === "data" ? call("list_devices").catch(() => []) : DS.devs,
   ]);
-  S.sync = sy; PJ.list = pj; S.profile = prof; S.status = st0; S.update = up;
+  S.sync = sy; S.profile = prof; S.status = st0; S.update = up;
+  if (tab === "data") { DS.devs = devs; DS.names = Object.fromEntries((devs || []).filter((d) => d.custom).map((d) => [d.id, d.name])); }
   renderSide();
   const st = S.status, cf = S.settings;
   const theme = document.documentElement.dataset.theme || "";
@@ -3202,20 +3343,13 @@ async function renderSettings() {
 
   let body = "";
   if (tab === "general") {
-    const mobile = !!st.mobile;
-    body = section(tr("个人资料"), profileRow())
-      + (mobile ? phoneSection() : "")
+    // 电脑上个人资料在左下角菜单里改；手机没有那个菜单，放这里
+    body = (mobile ? section(tr("个人资料"), profileRow()) : "")
       + section(tr("通用"), (mobile ? "" : setRow(tr("开机自动启动"), tr("登录电脑后自动开始记录"), `<button class="mx-switch" role="switch" id="login" aria-checked="${!!st.login_item}" aria-label="${tr("开机自动启动")}"></button>`))
         + setRow(tr("主题"), "", `<div class="mx-seg" role="tablist" id="theme">${THEMES.map(([k, v]) => `<button role="tab" aria-selected="${k === theme}" class="${k === theme ? "is-on" : ""}" data-theme="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("语言"), "", `<div class="mx-seg" role="tablist" id="lang">${LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === langPref}" class="${k === langPref ? "is-on" : ""}" data-lang="${k}">${v}</button>`).join("")}</div>`)
-        + setRow(tr("AI 总结的语言"), tr("10 分钟摘要、日总结、周总结、月总结用哪种语言写"), `<div class="mx-seg" role="tablist" id="sum-lang">${SUM_LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.summary_language || "")}" class="${k === (cf.summary_language || "") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
-        + (mobile ? "" : setRow(tr("摘要间隔"), tr("越长越省 token，细节越少"), `<div class="mx-seg" role="tablist" id="sum-every">${[10, 20, 30, 60].map((k) => `<button role="tab" aria-selected="${k === (cf.summary_minutes || 10)}" class="${k === (cf.summary_minutes || 10) ? "is-on" : ""}" data-v="${k}">${tr("{n} 分钟", { n: k })}</button>`).join("")}</div>`))
-        + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), `<div class="mx-seg" role="tablist" id="roast">${ROASTS.map(([k, v]) => `<button role="tab" aria-selected="${k === (cf.roast || "off")}" class="${k === (cf.roast || "off") ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`)
         + (mobile ? "" : setRow(tr("字体"), fontDesc(), smallBtn("font-edit", tr("更改")))))
       + (mobile ? section(tr("关于"), setRow(tr("版本 {v}", { v: esc(st.version || "") }), tr("手机版跟着 TestFlight 更新"), "")) : aboutSection());
-  } else if (tab === "account") {
-    if (cf.sync_mode === "folder" && !sy.configured && !AC.folder) AC.folder = await call("folder_state").catch(() => ({}));
-    body = sy.shadow ? section(tr("账号"), emptyInline(tr("测试版不登录账号"))) : section(tr("账号与同步"), accountBody(sy));
   } else if (tab === "record") {
     const pause = st.paused
       ? setRow(tr("已暂停"), st.paused_until ? tr("到 {t} 自动继续", { t: hm(st.paused_until) }) : tr("一直暂停，点继续才恢复"), smallBtn("pause-off", tr("继续记录")))
@@ -3225,54 +3359,27 @@ async function renderSettings() {
         <div class="inline"><input class="mx-input mono" id="block-new" placeholder="${tr("app 名或 bundle id，比如 1Password")}" aria-label="${tr("不记录的 app")}"><button class="mx-btn mx-btn--secondary" id="block-add">${tr("加入")}</button></div></div>`;
     const del = setRow(tr("删除最近的记录"), SS.deleted != null ? tr("刚删掉 {n} 条", { n: SS.deleted }) : tr("比如刚输过的私人内容"), smallBtn("del-open", tr("删除")));
     body = section(tr("记录"), pause + block) + section(tr("隐私"), del);
-  } else if (tab === "connect") {
-    const ks = cf.api_key_source;
-    const amap = cf.has_amap_key && cf.has_amap_js ? tr("Key 已存") : cf.has_amap_key ? tr("缺地图 Key") : tr("还没有 Key");
-    const osm = cf.map_provider === "osm";
-    const syncLocked = sy.configured && !sy.shadow;
-    const L = SS.llm || {};
-    const official = cf.model_mode === "official", asrOfficial = cf.transcribe_server === cf.default_transcribe_server, mapOfficial = cf.map_mode === "official";
-    const planPill = L.error ? pill(false, tr("没登录账号")) : L.plan === "official" ? pill(true, tr("已开通")) : L.plan === "stopped" ? pill(false, tr("已停用")) : SS.llm ? pill(false, tr("没开通")) : "";
-    // 三项本月用量：用了多少 / 上限，进度条；这一项改成自己的就写「用的是自己的」
-    // 上限是负数＝这一项没开（新账号只开模型）
-    const useRow = (name, u, using, fmt) => {
-      const used = (u && u.used) || 0, q = (u && u.quota) || 0;
-      if (q < 0) return setRow(name, using ? tr("没开通，联系管理员或改用自己的") : tr("没开通 · 这一项用的是自己的"), "");
-      const pct = q ? Math.min(100, Math.round(used / q * 100)) : 0;
-      return setRow(name, `${fmt(used)} / ${q ? fmt(q) : tr("不限")}${using ? "" : ` · ${tr("这一项用的是自己的")}`}<div class="usebar"><i style="width:${pct}%"${pct >= 90 ? ' class="hot"' : ""}></i></div>`, `<span class="note mono">${q ? pct + "%" : ""}</span>`);
-    };
-    const tokens = (n) => (n >= 1e4 ? tr("{n} 万 token", { n: numText(Math.round(n / 1e4)), k: numText(Math.round(n / 1e3)) }) : tr("{n} token", { n: numText(n) }));
-    const minutes = (sec) => tr("{n} 分钟", { n: numText(Math.round(sec / 60)) });
-    const calls = (n) => tr("{n} 次", { n: numText(n) });
-    body = section(tr("官方服务"), setRow(tr("这个账号"), L.plan === "official" ? tr("{list}用官方的，不用填 Key", { list: [[tr("模型"), L.llm], [tr("转写"), L.asr], [tr("地图"), L.map]].filter(([, u]) => !u || (u.quota || 0) >= 0).map(([n]) => n).join(tr("、")) }) : L.plan === "stopped" ? tr("已停用，联系管理员") : L.error ? tr("登录后才能用") : tr("还没开通，联系管理员"), planPill)
-        + (L.plan === "official" ? useRow(tr("模型"), L.llm, official, tokens) + useRow(tr("转写"), L.asr, asrOfficial, minutes) + useRow(tr("地图"), L.map, mapOfficial, calls) : ""))
-      + section(tr("服务"), (official
-      ? setRow(tr("模型"), tr("官方"), smallBtn("c-model", tr("设置")))
-      : setRow(tr("模型"), `${tr("自己的网关")} · <span class="mono">${esc(hostOf(cf.gateway))} · ${esc(cf.model_segment || tr("没填模型"))}</span> · ${ks ? tr("密钥已存") : tr("没有密钥")}`, smallBtn("c-model", tr("设置"))))
-      + (st.mobile ? "" : setRow(tr("模型用量"), tr("近 30 天，按用途分"), smallBtn("c-usage", tr("查看"))))
-      + setRow(tr("转写服务"), `${asrOfficial ? tr("官方") : `${tr("自建")} · <span class="mono">${esc(hostOf(cf.transcribe_server))}</span>`} · ${tr("你叫「{name}」", { name: esc(cf.speaker_name) })}${st.cloud_sync ? `<br>${esc(st.cloud_sync)}` : ""}`, smallBtn("c-asr", tr("设置")))
-      + setRow(tr("地图"), osm ? tr("OpenStreetMap · 免费，不用 Key") : `${tr("高德地图")} · ${mapOfficial ? tr("官方") : `${tr("自己的 Key")} · ${amap}`}`, smallBtn("c-amap", tr("设置")))
-      + setRow(tr("同步方式"), cf.sync_mode === "folder" && !st.mobile ? `${tr("同步文件夹")} · <span class="mono">${esc(tildePath(cf.sync_folder))}</span>`
-          : `<span class="mono">${esc(hostOf(cf.sync_server))}</span>${cf.sync_server === cf.default_sync_server ? ` · ${tr("官方服务器")}` : ` · ${tr("自建服务器")}`}`,
-        smallBtn("c-sync", tr("更改"), syncLocked ? `disabled title="${tr("同步开着不能换，先在「账号」里退出")}"` : ""))
-      )
-      + (st.mobile ? "" : section(tr("问问历史"), setRow(tr("接到 AI 里"), tr("让 Claude、Cursor 这类本机 AI 读你的记录，直接问「上周哪天熬夜最多」「X 推进到哪了」，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
-  } else if (tab === "data") {
-    body = SS.storage ? storageView(SS.storage) : `<div class="form">${emptyInline(tr("在看数据存在哪……"))}</div>`;
+  } else if (tab === "ai") {
+    body = aiBody(cf, st);
+  } else if (tab === "phone") {
+    body = (mobile ? phoneSection() : "") + section(mobile ? tr("服务") : tr("手机与手表"), servicesRows(cf, st));
   } else {
-    body = projectsSection();
+    body = syncPanel(sy) + devicesPanel(devs || [], st) + (SS.storage ? storageView(SS.storage) : "");
   }
-  if (stale(tk)) return; $app.innerHTML = header(tr("设置")) + `<div class="set-wrap">${tabs}<div class="form">${body}</div></div>`;
+  if (stale(tk)) return;
+  const host = setHost();
+  host.innerHTML = (host === $app ? header(tr("设置")) : "") + `<div class="set-wrap">${tabs}<div class="form">${body}</div></div>`;
 
   document.getElementById("set-tabs").onclick = (e) => {
     const b = e.target.closest("[data-st]"); if (!b) return;
     SS.tab = b.dataset.st; try { localStorage.setItem("settings-tab", SS.tab); } catch (x) {}
+    AC.confirmLogout = false;
     renderSettings();
   };
   const on = (id, f) => { const el = document.getElementById(id); if (el) el.onclick = f; };
+  const segSave = (id, key, num) => { const el = document.getElementById(id); if (el) el.onclick = async (e) => { const b = e.target.closest("[data-v]"); if (!b) return; await saveSome({ [key]: num ? +b.dataset.v : b.dataset.v }); renderSettings(); }; };
   if (tab === "general") {
-    bindProfile(); if (!st.mobile) bindAbout();
-    if (st.mobile) bindPhone();
+    if (mobile) bindProfile(); else bindAbout();
     document.getElementById("theme").onclick = (e) => {
       const b = e.target.closest("button"); if (!b) return;
       const t = b.dataset.theme;
@@ -3288,22 +3395,7 @@ async function renderSettings() {
     };
     on("login", async () => { try { await call("set_login_item", { on: !st.login_item }); } catch (x) { alert(tr("没改成：{err}", { err: x })); } renderSettings(); });
     on("font-edit", () => fontDialog(renderSettings));
-    document.getElementById("roast").onclick = async (e) => {
-      const b = e.target.closest("[data-v]"); if (!b) return;
-      await saveSome({ roast: b.dataset.v }); renderSettings();
-    };
-    const every = document.getElementById("sum-every");
-    if (every) every.onclick = async (e) => {
-      const b = e.target.closest("[data-v]"); if (!b) return;
-      await saveSome({ summary_minutes: +b.dataset.v }); renderSettings();
-    };
-    document.getElementById("sum-lang").onclick = async (e) => {
-      const b = e.target.closest("[data-v]"); if (!b) return;
-      await saveSome({ summary_language: b.dataset.v }); renderSettings();
-    };
   }
-  if (tab === "account" && !sy.shadow) bindAccount();
-  if (tab === "projects") bindProjects();
   if (tab === "record") {
     on("pause-off", async () => { await call("set_paused", { paused: false }); renderSettings(); });
     on("pause-open", () => choiceDialog({ title: tr("暂停记录"), options: PAUSES, note: tr("暂停期间不记录，到时间自动继续"), ok: tr("暂停"),
@@ -3317,8 +3409,36 @@ async function renderSettings() {
     const chips = document.getElementById("chips");
     if (chips) chips.onclick = (e) => { const b = e.target.closest("[data-i]"); if (b) setBlock(cf.blocklist.filter((_, i) => i !== +b.dataset.i)); };
   }
+  // 「AI」「手机与手表」都写官方额度：取一次，一分钟内不重取；电脑上「AI」另取近 30 天的用量
+  if (tab === "ai" || tab === "phone") {
+    const again = () => { if (S.page === "settings" && SS.tab === tab && !document.querySelector(".dlg-root")) renderSettings(); };
+    if (!SS.llmLoading && (!SS.llm || Date.now() - SS.llmAt > 60e3)) {
+      SS.llmLoading = true;
+      call("llm_status").then((v) => { SS.llm = v; }).catch((x) => { SS.llm = { error: String(x) }; })
+        .finally(() => { SS.llmAt = Date.now(); SS.llmLoading = false; again(); });
+    }
+    if (tab === "ai" && !mobile && !SS.usageLoading && (!SS.usage || Date.now() - SS.usageAt > 60e3)) {
+      SS.usageLoading = true;
+      call("llm_usage").then((v) => { SS.usage = v; }).catch((x) => { SS.usage = { error: String(x) }; })
+        .finally(() => { SS.usageAt = Date.now(); SS.usageLoading = false; again(); });
+    }
+  }
+  if (tab === "ai") {
+    segSave("sum-lang", "summary_language");
+    segSave("roast", "roast");
+    on("c-model", modelDialog);
+    on("c-usage", usageDialog);
+    on("c-mcp", mcpDialog);
+    on("ac-login", () => loginDialog("login"));
+  }
+  if (tab === "phone") {
+    if (mobile) bindPhone();
+    on("c-asr", asrDialog);
+    on("c-amap", amapDialog);
+  }
   clearInterval(SS.storageTimer);
   if (tab === "data") {
+    bindData(sy);
     const load = async () => {
       try { SS.storage = await call("storage_stats"); } catch (x) { SS.storage = { error: String(x) }; }
       if (S.page === "settings" && SS.tab === "data" && !document.querySelector(".dlg-root")) renderSettings();
@@ -3331,19 +3451,6 @@ async function renderSettings() {
       body: dlgField("repo", tr("路径"), { value: cf.repo_path || "", mono: true, ph: "~/人生记录", help: tr("日数据包和日总结的文件夹") }),
       submit: async (el) => { await saveSome({ repo_path: dlgVal(el, "repo") }); renderSettings(); },
     }));
-  }
-  if (tab === "connect") {
-    if (!SS.llmLoading && (!SS.llm || Date.now() - SS.llmAt > 60e3)) {
-      SS.llmLoading = true;
-      call("llm_status").then((v) => { SS.llm = v; SS.llmAt = Date.now(); }).catch((x) => { SS.llm = { error: String(x) }; })
-        .finally(() => { SS.llmLoading = false; if (S.page === "settings" && SS.tab === "connect" && !document.querySelector(".dlg-root")) renderSettings(); });
-    }
-    on("c-model", modelDialog);
-    on("c-asr", asrDialog);
-    on("c-amap", amapDialog);
-    on("c-sync", syncServerDialog);
-    on("c-usage", usageDialog);
-    on("c-mcp", mcpDialog);
   }
 }
 
@@ -3376,7 +3483,7 @@ function phoneSection() {
 function bindPhone() {
   const load = async () => {
     try { SS.native = await call("native_status"); } catch (x) { SS.native = { error: String(x) }; }
-    if (S.page === "settings" && SS.tab === "general" && !document.querySelector(".dlg-root")) renderSettings();
+    if (S.page === "settings" && SS.tab === "phone" && !document.querySelector(".dlg-root")) renderSettings();
   };
   if (!SS.nativeAt || Date.now() - SS.nativeAt > 5e3) { SS.nativeAt = Date.now(); load(); }
   const act = (name) => call("native_action", { name }).then(() => setTimeout(() => { SS.nativeAt = 0; renderSettings(); }, 800)).catch((x) => alert(String(x)));
@@ -3405,7 +3512,7 @@ function storageView(d) {
   const jobs = T.jobs ? Object.entries(T.jobs).map(([k, n]) => `${{ queued: tr("排队"), running: tr("在转"), done: tr("转好待取"), failed: tr("失败") }[k] || k} ${n}`).join(tr("、")) : "";
   const asr = section(tr("转写服务"), T.error ? `<p class="note" style="margin:0"><span class="mono">${esc(hostOf(T.server))}</span></p>${emptyInline(T.error)}`
     : setRow(`<span class="mono">${esc(hostOf(T.server))}</span>`, `${jobs || tr("没有你的任务")} · ${tr("占 {size}", { size: bytesText(T.bytes) })}`, `<span class="note">${esc(T.keep)}</span>`));
-  const repo = section(tr("人生记录仓库"), setRow(d.repo ? `<span class="mono">${esc((d.repo.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span>` : tr("没填"),
+  const repo = !(d.repo || (S.settings && S.settings.repo_path)) ? "" : section(tr("人生记录仓库"), setRow(d.repo ? `<span class="mono">${esc((d.repo.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span>` : tr("没填"),
     d.repo ? `raw/ ${tr("共 {size}", { size: bytesText(d.repo.bytes) })} · ${esc(d.repo.keep)}` : tr("日数据包和日总结的文件夹"), smallBtn("repo-edit", tr("更改"))));
   return local + cloud + asr + repo + `<p class="note">${d.at ? tr("{t} 取的，开着这一页每分钟更新。", { t: hm(new Date(d.at).toISOString()) }) : ""}</p>`;
 }
@@ -3413,9 +3520,9 @@ function storageView(d) {
 /** 模型：官方（按账号开通，经同步服务代调，不用填密钥）或自己的网关（地址、模型、密钥；地址和模型有默认值，密钥不预填） */
 function modelDialog() {
   const cf = S.settings, ks = cf.api_key_source;
-  let mode = cf.model_mode === "official" ? "official" : "custom";
-  const L = SS.llm || {};
-  const state = L.error ? tr("要先在「账号」里登录。") : L.plan === "official" ? tr("这个账号已开通。") : L.plan === "stopped" ? tr("这个账号的官方服务已停用。") : tr("这个账号还没开通。");
+  let mode = cf.model_mode === "official" ? "official" : "custom", every = cf.summary_minutes || 10;
+  const L = SS.llm || {}, mobile = !!(S.status && S.status.mobile);
+  const state = L.error ? tr("要先登录 Beayy 账号。") : L.plan === "official" ? tr("这个账号已开通。") : L.plan === "stopped" ? tr("这个账号的官方服务已停用。") : tr("这个账号还没开通。");
   openDialog({
     title: tr("模型"), ok: tr("保存"),
     body: `<div class="mx-field"><div class="mx-seg" role="tablist" id="md-mode">${[["official", tr("官方")], ["custom", tr("自己的网关")]].map(([k, v]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div></div>
@@ -3424,7 +3531,8 @@ function modelDialog() {
       + dlgField("gw", tr("网关地址"), { value: cf.gateway, mono: true, ph: cf.default_gateway, help: tr("兼容 OpenAI 接口，到 /v1 为止") })
       + dlgField("md", tr("模型"), { value: cf.model_segment, mono: true, ph: cf.default_model || tr("比如 gpt-4.1-mini"), help: tr("10 分钟摘要和日总结都用它。") })
       + dlgField("key", tr("密钥"), { type: "password", mono: true, ph: ks === "env" ? tr("在用环境变量里的") : ks ? KEEP : "sk-…", help: "" })
-      + (cf.default_gateway ? `<button class="mx-btn mx-btn--text mx-btn--sm" style="align-self:flex-start" id="md-reset">${tr("恢复默认地址和模型")}</button>` : "") + `</div>`,
+      + (cf.default_gateway ? `<button class="mx-btn mx-btn--text mx-btn--sm" style="align-self:flex-start" id="md-reset">${tr("恢复默认地址和模型")}</button>` : "") + `</div>`
+      + (mobile ? "" : `<div class="mx-field"><label>${tr("摘要间隔")}</label><div class="mx-seg" role="tablist" id="md-every">${[10, 20, 30, 60].map((k) => `<button role="tab" aria-selected="${k === every}" class="${k === every ? "is-on" : ""}" data-v="${k}">${tr("{n} 分钟", { n: k })}</button>`).join("")}</div><p class="note">${tr("越长越省 token，细节越少")}</p></div>`),
     onOpen: (el) => {
       const r = el.querySelector("#md-reset");
       if (r) r.onclick = () => { el.querySelector("#gw").value = cf.default_gateway; el.querySelector("#md").value = cf.default_model; };
@@ -3435,8 +3543,15 @@ function modelDialog() {
         el.querySelector("#md-official").hidden = mode !== "official";
         el.querySelector("#md-custom").hidden = mode !== "custom";
       };
+      const ev = el.querySelector("#md-every");
+      if (ev) ev.onclick = (e) => {
+        const b = e.target.closest("[data-v]"); if (!b) return;
+        every = +b.dataset.v;
+        ev.querySelectorAll("button").forEach((x) => { x.classList.toggle("is-on", x === b); x.setAttribute("aria-selected", x === b); });
+      };
     },
     submit: async (el) => {
+      if (every !== (cf.summary_minutes || 10)) await saveSome({ summary_minutes: every });
       if (mode === "official") { await saveSome({ model_mode: "official" }); SS.llm = null; return renderSettings(); }
       const gw = dlgVal(el, "gw").replace(/\/+$/, ""), md = dlgVal(el, "md"), key = dlgVal(el, "key");
       if (!isUrl(gw)) throw tr("网关地址要以 https:// 开头，比如 https://api.openai.com/v1");
@@ -3514,50 +3629,34 @@ function amapDialog() {
   });
 }
 
-/** 同步方式：官方服务器（默认）、自建服务器（app/server 部署的）、同步文件夹（iCloud 云盘、网盘、NAS，不经服务器；手机没有）。
- * 只能在没开同步时换。after＝存好以后接着做的（从登录框点进来的回到登录框） */
+/** Beayy 服务用哪台：官方（默认）或自己部署的（app/server）。只能在没登录时换。after＝存好以后接着做的（从登录框点进来的回到登录框） */
 function syncServerDialog(after) {
-  const cf = S.settings, mobile = !!(S.status || {}).mobile;
-  let mode = cf.sync_mode === "folder" && !mobile ? "folder" : cf.sync_server === cf.default_sync_server ? "official" : "custom";
-  const seg = [["official", tr("官方服务器")], ["custom", tr("自建服务器")], ["folder", tr("同步文件夹")]].filter(([k]) => !mobile || k !== "folder");
+  const cf = S.settings;
+  let mode = cf.sync_server && cf.sync_server !== cf.default_sync_server ? "custom" : "official";
   openDialog({
-    title: tr("同步方式"), ok: tr("保存"),
-    body: `<div class="mx-field"><div class="mx-seg" role="tablist" id="sm-mode">${seg.map(([k, v]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div></div>
-      <div id="sm-official" ${mode === "official" ? "" : "hidden"}><p class="note">${tr("记录加密后存在官方服务器，服务器读不到内容。官方模型、转写、地图和 iPhone 的停留点、录音都走它")}</p></div>
-      <div id="sm-custom" class="stack" ${mode === "custom" ? "" : "hidden"}>${dlgField("ss", tr("地址"), { value: cf.sync_server === cf.default_sync_server ? "" : cf.sync_server, mono: true, ph: "https://sync.example.com", help: tr("自己部署的服务端（app/server，Docker 一条命令）") })}</div>
-      <div id="sm-folder" class="stack" ${mode === "folder" ? "" : "hidden"}>
-        <div class="mx-field"><label for="sf">${tr("文件夹")}</label><div class="inline"><input class="mx-input mono" id="sf" value="${esc(cf.sync_folder || "")}" placeholder="${esc(cf.icloud_folder || "")}"><button class="mx-btn mx-btn--secondary" id="sf-pick" type="button">${tr("选择…")}</button></div>
-          ${cf.icloud_folder ? `<button class="mx-btn mx-btn--text mx-btn--sm" style="align-self:flex-start" id="sf-icloud" type="button">${tr("用 iCloud 云盘")}</button>` : ""}</div>
-        <p class="note">${tr("选一个网盘会同步的文件夹（iCloud 云盘、OneDrive、Dropbox、坚果云、Syncthing、NAS），每台电脑选同一个。记录加密后写进去，网盘读不到内容，不经过我们的服务器。<br>没有服务器就用不了官方模型、转写、地图，iPhone 的停留点和录音也传不过来")}</p>
-      </div>`,
-    onOpen: (el, d) => {
+    title: tr("Beayy 服务"), ok: tr("保存"),
+    body: `<div class="mx-field"><div class="mx-seg" role="tablist" id="sm-mode">${[["official", tr("官方")], ["custom", tr("自己部署的")]].map(([k, v]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div></div>
+      <div id="sm-official" ${mode === "official" ? "" : "hidden"}><p class="note">${tr("记录加密后存在官方服务器，服务器读不到内容")}</p></div>
+      <div id="sm-custom" class="stack" ${mode === "custom" ? "" : "hidden"}>${dlgField("ss", tr("地址"), { value: mode === "custom" ? cf.sync_server : "", mono: true, ph: "https://sync.example.com", help: tr("自己部署的服务端（app/server，Docker 一条命令）") })}</div>`,
+    onOpen: (el) => {
       el.querySelector("#sm-mode").onclick = (e) => {
         const b = e.target.closest("[data-v]"); if (!b) return;
         mode = b.dataset.v;
         el.querySelectorAll("#sm-mode button").forEach((x) => { x.classList.toggle("is-on", x === b); x.setAttribute("aria-selected", x === b); });
-        for (const k of ["official", "custom", "folder"]) el.querySelector("#sm-" + k).hidden = mode !== k;
+        for (const k of ["official", "custom"]) el.querySelector("#sm-" + k).hidden = mode !== k;
       };
-      const ic = el.querySelector("#sf-icloud");
-      if (ic) ic.onclick = () => { el.querySelector("#sf").value = cf.icloud_folder; };
-      el.querySelector("#sf-pick").onclick = async () => { try { const p = await call("pick_folder"); if (p) el.querySelector("#sf").value = p; } catch (x) { d.setErr(String(x)); } };
     },
     submit: async (el) => {
-      if (mode === "folder") {
-        const f = dlgVal(el, "sf") || cf.icloud_folder;
-        if (!f) throw tr("选一个文件夹。");
-        await saveSome({ sync_mode: "folder", sync_folder: f });
-      } else {
-        const v = mode === "official" ? "" : dlgVal(el, "ss").replace(/\/+$/, "");
-        if (mode === "custom" && !isUrl(v)) throw tr("地址要以 https:// 开头。");
-        await saveSome({ sync_mode: "server", sync_server: v });
-      }
-      AC.folder = null; renderSettings();
+      const v = mode === "official" ? "" : dlgVal(el, "ss").replace(/\/+$/, "");
+      if (mode === "custom" && !isUrl(v)) throw tr("地址要以 https:// 开头。");
+      await saveSome({ sync_mode: "server", sync_server: v });
+      renderSettings();
       if (typeof after === "function") setTimeout(after);
     },
   });
 }
 
-/** 模型用量：最近 30 天每天的 token（输入＋输出），按用途分。官方模型的本月额度在「官方服务」里 */
+/** 模型用量：最近 30 天每天的 token（输入＋输出），按用途分。官方模型的本月额度写在设置「AI」的模型那一行 */
 const USE_KINDS = { money: tr("钱"), segment: tr("10 分钟摘要"), hourly: tr("小时摘要"), daily: tr("日总结"), weekly: tr("周总结"), monthly: tr("月总结"), tag: tr("补标签"), alias: tr("项目归并"), other: tr("其他") };
 async function usageDialog() {
   let u;
@@ -3578,7 +3677,7 @@ async function usageDialog() {
       <div class="ub-cols" role="img" aria-label="${tr("最近 30 天每天的用量")}">${days.map((d) => `<span title="${tr("{date}：输入 {in}，输出 {out} token", { date: esc(short(d.date)), in: numText(d.in), out: numText(d.out) })}"><i style="height:${Math.round(((d.in + d.out) / max) * 100)}%"></i></span>`).join("")}</div>
       <div class="ub-axis"><span>${days[0] ? short(days[0].date) : ""}</span><span>${tr("今天")}</span></div>
       ${rows.length ? `<table class="mx-table ub-table"><thead><tr><th>${tr("近 30 天")}</th><th class="num">${tr("次数")}</th><th class="num">${tr("输入")}</th><th class="num">${tr("输出")}</th><th class="num">${tr("占比")}</th></tr></thead><tbody>${rows.map(([k, v]) => `<tr><td>${esc(USE_KINDS[k] || k)}</td><td class="num mono">${numText(v.calls)}</td><td class="num mono">${tok(v.in)}</td><td class="num mono">${tok(v.out)}</td><td class="num mono">${Math.round(((v.in + v.out) / all) * 100)}%</td></tr>`).join("")}</tbody></table>` : `<p class="mx-empty-inline">${tr("最近 30 天还没用过模型")}</p>`}
-      <p class="note">${u.official ? tr("在这台电脑上记的；官方模型的本月额度看「官方服务」") : tr("在这台电脑上记的，按你的网关怎么计费去算钱")}</p>`,
+      <p class="note">${u.official ? tr("在这台电脑上记的；官方模型的本月额度写在「模型」那一行") : tr("在这台电脑上记的，按你的网关怎么计费去算钱")}</p>`,
   });
 }
 
@@ -3632,8 +3731,8 @@ async function renderOnboarding() {
        <div class="mx-field"><label for="ob-model">${tr("模型名")}</label><input class="mx-input mono" id="ob-model" value="${esc(S.draft.model_segment || "")}" placeholder="${tr("比如 gpt-4.1-mini")}"></div>
        <div class="mx-field"><label for="ob-key">${tr("密钥")}</label><input class="mx-input mono" id="ob-key" type="password" autocomplete="off" placeholder="${S.settings.has_api_key ? tr("已经存过一把，不改就留空") : "sk-…"}"></div>
        <div class="btns sync-btns"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="ob-test" ${OB.busy ? "disabled" : ""}>${OB.busy ? tr("测试中…") : tr("存下并测试一下")}</button></div></div>`}`,
-    `<h2>${tr("同步（可选）")}</h2><p class="ob-lead">${tr("有好几台设备，就注册或登录一个账号，或者在设置里选一个网盘文件夹同步；只用这一台可以跳过。")}</p>
-     <div class="btns sync-btns"><button class="mx-btn mx-btn--secondary" id="ob-account">${tr("去登录或注册")}</button></div>`,
+    `<h2>${tr("同步（可选）")}</h2><p class="ob-lead">${tr("有好几台设备，选一种同步方式：iCloud、网盘或 Beayy 服务；只用这一台可以跳过。")}</p>
+     <div class="btns sync-btns"><button class="mx-btn mx-btn--secondary" id="ob-account">${tr("选同步方式")}</button></div>`,
   ][OB.step];
   const last = OB.step === steps.length - 1;
   $app.innerHTML = `<div class="ob">${dots}<div class="ob-body">${illus(["day", "key", "notebook", "sync"][OB.step])}${body}${msg}</div>
@@ -3667,7 +3766,7 @@ async function renderOnboarding() {
     document.documentElement.classList.remove("onboarding");
     location.hash = to; route();
   };
-  on("ob-account", () => finish("#/settings"));
+  on("ob-account", () => { SS.tab = "data"; finish("#/settings"); });
   on("ob-next", async () => {
     if (OB.step === 2 && OB.mode === "official") { S.draft = { ...S.draft, model_mode: "official" }; await call("save_settings", { settings: { model_mode: "official" } }); }
     else if (OB.step === 2 && (document.getElementById("ob-model").value.trim() || document.getElementById("ob-key").value.trim())) { try { await saveModel(); } catch (x) { OB.err = String(x); return renderOnboarding(); } }
@@ -3684,11 +3783,17 @@ const RT = { seq: 0, snap: new Map() };
 const stale = (tk) => tk !== RT.seq;
 
 async function route() {
+  // 旧地址：规矩并进了「方向」，设备列表并进了设置的「数据」
+  if (/^#\/rules\/?$/.test(location.hash)) history.replaceState(null, "", "#/direction");
+  if (/^#\/devices\/?$/.test(location.hash)) { SS.tab = "data"; history.replaceState(null, "", "#/settings"); }
   const tk = ++RT.seq, key = location.hash || "#/today";
   const [page = "today", arg, arg2] = location.hash.replace(/^#\/?/, "").split("/");
   // 换页就关掉弹层；刚拿到恢复码那个必须点「我已存好」才关
   if (DLG && DLG.closable) closeDialog();
-  S.page = ["today", "summary", "money", "rules", "devices", "settings"].includes(page) ? page : "today";
+  S.page = ["today", "summary", "money", "direction", "devices", "settings"].includes(page) ? page : "today";
+  // 设置在电脑上是盖在页面上的弹层：底下那页不动，关掉回到它
+  if (S.page !== "settings") { SET.back = key; dropSettings(); }
+  if (S.page === "settings" && setModal()) return routeSettings(tk);
   markNav(S.page);
   try {
     if (!S.days.length && !S.status) await boot();
@@ -3704,8 +3809,8 @@ async function route() {
     $app.classList.add(snap ? "is-stale" : "is-wait");
     if (S.page === "summary") await renderSummary(arg, arg2);
     else if (S.page === "money") await renderMoney(arg);
-    else if (S.page === "rules") await renderRules();
-    else if (S.page === "devices") { if (arg) await renderDevice(decodeURIComponent(arg), arg2); else { DEV.id = null; stopEventsTimer(); await renderDevices(); } }
+    else if (S.page === "direction") await (arg === "projects" ? renderProjects() : renderRules());
+    else if (S.page === "devices") await renderDevice(decodeURIComponent(arg), arg2);
     else if (S.page === "settings") await renderSettings();
     else { TD.date = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : null; await renderToday(); }
     if (stale(tk)) return;
@@ -3720,8 +3825,25 @@ async function route() {
   }
 }
 
+/** 设置（弹层）：底下还没有页（直接打开 #/settings）就先画今天 */
+async function routeSettings(tk) {
+  try {
+    if (!S.days.length && !S.status) await boot();
+    if (!S.settings) { S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings)); }
+    if (!S.settings.onboarded && TAURI && !(S.status && S.status.mobile)) return renderOnboarding();
+    if (!$app.dataset.key) { TD.date = null; S.page = "today"; await renderToday(); $app.dataset.key = "#/today"; SET.back = "#/today"; S.page = "settings"; markNav("today"); }
+    if (stale(tk)) return;
+    await renderSettings();
+  } catch (e) {
+    if (!stale(tk)) setHost().innerHTML = `<p class="mx-error">${esc(e && e.message ? e.message : e)}</p>`;
+  }
+}
+
 document.addEventListener("click", (e) => {
   for (const menu of document.querySelectorAll(".pick .mx-menu")) if (!menu.hidden && !menu.parentElement.contains(e.target)) menu.hidden = true;
+  // 指到设置某一页的链接（「设置模型」「去开」这类）：先记下要开哪一页
+  const t = e.target.closest("[data-set-tab]");
+  if (t) { SS.tab = t.dataset.setTab; try { localStorage.setItem("settings-tab", SS.tab); } catch (x) {} }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") for (const menu of document.querySelectorAll(".pick .mx-menu")) menu.hidden = true;

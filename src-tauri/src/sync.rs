@@ -114,9 +114,10 @@ pub fn server() -> String {
     crate::data::read_settings_raw().get("sync_server").and_then(|v| v.as_str()).map(|s| s.trim().trim_end_matches('/').to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| beayy_sync::DEFAULT_SERVER.to_string())
 }
 
-/// 同步方式：server（官方或自建服务器，默认）或 folder（同步文件夹，设置里的 sync_folder）
+/// 设置里选的同步方式：server（官方或自建服务器，默认）、folder（同步文件夹，设置里的 sync_folder）、webdav、icloud。
+/// 只记页面上选的是哪个；真正在用的看 sync_status 的 mode（账号里存的）
 pub fn mode() -> String {
-    crate::data::read_settings_raw().get("sync_mode").and_then(|v| v.as_str()).filter(|s| *s == "folder").unwrap_or("server").to_string()
+    crate::data::read_settings_raw().get("sync_mode").and_then(|v| v.as_str()).filter(|s| ["folder", "webdav", "icloud"].contains(s)).unwrap_or("server").to_string()
 }
 
 pub fn folder() -> String {
@@ -154,6 +155,65 @@ pub async fn folder_join(password: String) -> Result<(), String> {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub async fn folder_recover(code: String, password: String) -> Result<(), String> {
     beayy_sync::folder_recover(&data_root(), &folder(), &code, &password)?;
+    kick();
+    Ok(())
+}
+
+// ---------- WebDAV（坚果云、NAS、Nextcloud）：地址、用户名、密码只存进账号（钥匙串），不进设置 ----------
+
+/// 连不连得上、里面开没开过同步：{ok, vault, error?}
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn webdav_state(url: String, user: String, pass: String) -> Value {
+    beayy_sync::webdav_state(&url, &user, &pass)
+}
+
+/// 第一台设备在 WebDAV 里新开同步，返回恢复码
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn webdav_create(url: String, user: String, pass: String, password: String) -> Result<String, String> {
+    let code = beayy_sync::webdav_create(&data_root(), &url, &user, &pass, &password)?;
+    kick();
+    Ok(code)
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn webdav_join(url: String, user: String, pass: String, password: String) -> Result<(), String> {
+    beayy_sync::webdav_join(&data_root(), &url, &user, &pass, &password)?;
+    kick();
+    Ok(())
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn webdav_recover(url: String, user: String, pass: String, code: String, password: String) -> Result<(), String> {
+    beayy_sync::webdav_recover(&data_root(), &url, &user, &pass, &code, &password)?;
+    kick();
+    Ok(())
+}
+
+// ---------- iCloud（Mac＋iPhone，不要 Beayy 账号）：iCloud 容器里的同步文件夹，见 beayy_sync::icloud_dir ----------
+
+/// 这台设备能不能用 iCloud、里面开没开过同步：{available, path?, vault, error?}
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn icloud_state() -> Value {
+    beayy_sync::icloud_state()
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn icloud_create(password: String) -> Result<String, String> {
+    let code = beayy_sync::icloud_create(&data_root(), &password)?;
+    kick();
+    Ok(code)
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn icloud_join(password: String) -> Result<(), String> {
+    beayy_sync::icloud_join(&data_root(), &password)?;
+    kick();
+    Ok(())
+}
+
+#[cfg_attr(not(beayy_mobile), tauri::command)]
+pub async fn icloud_recover(code: String, password: String) -> Result<(), String> {
+    beayy_sync::icloud_recover(&data_root(), &code, &password)?;
     kick();
     Ok(())
 }

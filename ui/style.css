@@ -830,3 +830,25 @@ ol.up-notes li::before { content: counter(up) "."; position: absolute; left: 0; 
 /* 换页（app.js 的 route）：摆出来的是这页上次的样子，数据到了才能点；没看过的页旧页先停着，过 0.12 秒还没好再淡下去，快的时候不闪 */
 #app.is-stale, #app.is-wait { pointer-events: none; }
 #app.is-wait { opacity: .45; transition: opacity .15s .12s; }
+
+/* ---------- 设置弹层（照 Claude：盖在当前页上，左边分区、右边内容；窄屏仍是整页） ---------- */
+.set-root { position: fixed; inset: 0; z-index: 40; }
+.set-dialog { width: min(960px, 100%); height: min(88vh, 860px); }
+.set-dialog .mx-dialog-body { padding: 4px 24px 24px; }
+.set-dialog .set-wrap > .mx-subnav { position: sticky; top: 0; }
+
+/* ---------- 同步方式卡片 ---------- */
+.sync-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.sync-way { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: none; color: var(--ink); font: 14px/20px var(--font-sans); text-align: left; cursor: pointer; }
+.sync-way:hover { background: var(--hover); }
+.sync-way b { font-weight: 500; }
+.sync-way span { font-size: 12px; line-height: 18px; color: var(--ink-3); }
+.sync-way.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.sync-way:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sync-adv { margin: var(--space-2) 0 0 -8px; }
+.sync-ways + .rows, .sync-adv + .rows { margin-top: var(--space-4); }
+@media (max-width: 759px) { .sync-ways { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- 方向：规矩、项目两个页签 ---------- */
+.dir-tabs { margin-bottom: var(--space-5); }
+.pj-note { margin-top: 0; }

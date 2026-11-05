@@ -66,7 +66,7 @@ Beayy 自带一个本机 MCP 服务。接到 Claude Code、Claude 桌面版或 C
 claude mcp add beayy -- "/Applications/Beayy.app/Contents/MacOS/beayy" --mcp
 ```
 
-Claude 桌面版、Cursor 的配置在「设置 → 连接 → 接到 AI 里」，复制粘贴即可。提供的工具：`list_days`（最近每天概况）、`get_day`（某天的时长、每小时在做什么、时间花在哪、日总结）、`search`（在 10 分钟摘要里搜关键词）、`get_rules_and_projects`。
+Claude 桌面版、Cursor 的配置在「设置 → AI → 接到别的 AI」，复制粘贴即可。提供的工具：`list_days`（最近每天概况）、`get_day`（某天的时长、每小时在做什么、时间花在哪、日总结）、`search`（在 10 分钟摘要里搜关键词）、`get_rules_and_projects`。
 
 <p align="center"><img src="docs/images/mcp.png" alt="接到 AI 里" width="860"></p>
 
@@ -92,7 +92,7 @@ Claude 桌面版、Cursor 的配置在「设置 → 连接 → 接到 AI 里」�
 | 健康（可选） | iPhone app 只读苹果健康（睡眠、步数、活动、锻炼、心率、心情等），加密后经同步传到电脑，今天页汇成昨晚睡眠和当天活动；日总结不写心率、心情这类细项 |
 | 手表（可选） | Apple Watch 全天录音，传到转写服务（官方的或你自己部署的）转写、分说话人；电脑上只有文字（谁在几点说了什么） |
 | 存储 | 全部在本机 `~/Library/Application Support/Beayy/`，按设备、每 10 分钟一个文件，只追加 |
-| 摘要 | 把那 10 分钟的记录发给**你配置**的模型（任何 OpenAI 兼容接口，或官方服务），写回本机。「设置 → 连接 → 模型 → 用量」看每天花了多少 token |
+| 摘要 | 把那 10 分钟的记录发给**你配置**的模型（任何 OpenAI 兼容接口，或官方服务），写回本机。「设置 → AI → 模型 → 用量」看每天花了多少 token |
 | 同步（可选） | 本机压缩、XChaCha20-Poly1305 加密后上传；主密码只在设备上用（Argon2id 派生），服务器只存密文和登录校验值的哈希 |
 
 ## 安装
