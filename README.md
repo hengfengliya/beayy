@@ -66,7 +66,7 @@ Beayy 自带一个本机 MCP 服务。接到 Claude Code、Claude 桌面版或 C
 claude mcp add beayy -- "/Applications/Beayy.app/Contents/MacOS/beayy" --mcp
 ```
 
-Claude 桌面版、Cursor 的配置在「设置 → AI → 接到别的 AI」，复制粘贴即可。提供的工具：`list_days`（最近每天概况）、`get_day`（某天的时长、每小时在做什么、时间花在哪、日总结）、`search`（在 10 分钟摘要里搜关键词）、`get_rules_and_projects`。
+Claude 桌面版、Cursor 的配置在「设置 → AI → 连接」，复制粘贴即可。提供的工具：`list_days`（最近每天概况）、`get_day`（某天的时长、每小时在做什么、时间花在哪、日总结）、`search`（在 10 分钟摘要里搜关键词）、`get_rules_and_projects`。
 
 <p align="center"><img src="docs/images/mcp.png" alt="接到 AI 里" width="860"></p>
 

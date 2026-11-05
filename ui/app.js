@@ -227,6 +227,8 @@ function header(title, right = "") {
 }
 const section = (title, body, { count, aside } = {}) =>
   `<section class="mx-sec"><div class="mx-sec-head"><h2>${esc(title)}</h2>${count != null ? `<span class="mx-count">${count}</span>` : ""}${aside ? `<span class="mx-sec-aside">${aside}</span>` : ""}</div>${body}</section>`;
+/** 设置里一页只有一组：不写标题（标题不重复页签名） */
+const group = (body) => `<section class="mx-sec">${body}</section>`;
 const emptyInline = (text) => `<p class="mx-empty-inline">${esc(text)}</p>`;
 /** 设计系统的插画（vendor/moxian/illus.js，按名字取：day、notebook、map、sync、update、health、key）；sm＝弹层里的小号 */
 const illus = (name, sm = false) => { const svg = (window.MX_ILLUS || {})[name] || ""; return sm ? svg.replace('class="mx-illus"', 'class="mx-illus mx-illus--sm"') : svg; };
@@ -867,14 +869,18 @@ const MI = {
 
 // ---------- 自动更新：后台下好了，菜单和设置里出「重启更新」 ----------
 
-/** 左下角菜单里的一行：下好了可以点；还在下就只显示 */
 /** 新版本下好了、能装（电脑版）：头像和设置「通用」挂一个点，装完就没了 */
 const updateReady = () => { const u = S.update || {}; return !!(u.newer && u.ready && !u.updatable) && !(S.status && S.status.mobile); };
 
-function updateItem() {
-  const u = S.update || {};
-  if (!u.newer || u.updatable) return "";
-  return u.ready ? `<button role="menuitem" data-me="update">${MI.update}${tr("重启更新到 {v}", { v: esc(u.latest) })}</button>` : `<button role="menuitem" disabled>${MI.update}${tr("正在下载 {v}", { v: esc(u.latest) })}</button>`;
+/** 左下角菜单里版本那行：平时点了检查更新（菜单不关，就地显示结果），在下就显示进度，下好了点了重启更新 */
+let ME_CHECKED = false;
+function updateItem(ver) {
+  const u = S.update, v = `<span class="mx-menu-val">${esc(ver)}</span>`;
+  if (!u) return `<button role="menuitem" disabled>${MI.info}${tr("版本")}${v}</button>`;
+  if (u.newer && u.ready && !u.updatable) return `<button role="menuitem" data-me="update">${MI.update}${tr("重启更新到 {v}", { v: esc(u.latest) })}</button>`;
+  if (upBusy(u) || (u.newer && !u.updatable)) return `<button role="menuitem" disabled>${MI.update}${esc(upState(u))}</button>`;
+  if (ME_CHECKED) return `<button role="menuitem" data-me="check" title="${esc(u.error || "")}">${MI.update}${u.error ? tr("没检查成功") : tr("已是最新版本")}${v}</button>`;
+  return `<button role="menuitem" data-me="check">${MI.update}${tr("检查更新")}${v}</button>`;
 }
 
 async function loadUpdate() {
@@ -931,11 +937,12 @@ function pollUpdate() {
   const u = S.update || {};
   if (!TAURI || !upBusy(u)) return;
   UP_POLL = setTimeout(async () => {
-    const el = document.getElementById("up-state");
-    if (!el) return;
+    const el = document.getElementById("up-state"), menu = document.getElementById("me-menu");
+    const menuOpen = menu && !menu.hidden;
+    if (!el && !menuOpen) return;
     try { S.update = await call("update_status"); } catch (e) { return; }
     const n = S.update || {};
-    if (upBusy(n)) { el.textContent = upState(n); pollUpdate(); }
+    if (upBusy(n)) { if (el) el.textContent = upState(n); if (menuOpen) renderMeMenu(); pollUpdate(); }
     else { renderSide(); updatePrompt(); if (document.getElementById("up-state")) renderSettings(); }
   }, 1500);
 }
@@ -944,7 +951,7 @@ function aboutSection() {
   const u = S.update || {}, st = S.status || {};
   const state = upState(u);
   const btn = u.newer && u.ready && !u.updatable ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-go">${tr("重启更新")}</button>` : `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-check" ${upBusy(u) ? "disabled" : ""}>${tr("检查更新")}</button>`;
-  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本 {v}", { v: esc(u.current || st.version || "") })}</div><div class="mx-setting-desc" id="up-state">${esc(state)}</div>${u.newer && u.notes ? `<div class="mx-setting-desc">${esc(u.notes)}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
+  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本")}</div><div class="mx-setting-desc">${esc(u.current || st.version || "")} · <span id="up-state">${esc(state)}</span></div>${u.newer && u.notes ? `<div class="mx-setting-desc">${esc(u.notes)}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
 }
 
 function bindAbout() {
@@ -966,14 +973,14 @@ function renderMeMenu() {
   menu.innerHTML = `<div class="mx-menu-group">${esc((S.sync && S.sync.email) || (st.device || "").replace(/^mac-/, "Mac · "))}</div>
     <button role="menuitem" data-me="profile">${MI.user}${tr("编辑资料")}</button>
     <button role="menuitem" data-me="settings">${MI.gear}${tr("设置")}<span class="mx-menu-val">⌘,</span></button>
-    ${st.paused
-      ? `<button role="menuitem" data-me="resume">${MI.play}${tr("继续记录")}${st.paused_until ? `<span class="mx-menu-val">${tr("{t} 自动继续", { t: hm(st.paused_until) })}</span>` : ""}</button>`
-      : `<button role="menuitem" data-me="pause">${MI.pause}${tr("暂停记录 1 小时")}</button>`}
-    <button role="menuitem" data-me="devices">${MI.devices}${tr("设备与同步")}</button>
+    <button role="menuitem" data-me="devices">${MI.devices}${tr("同步与设备")}</button>
     <button role="menuitem" data-me="data">${MI.folder}${tr("打开数据目录")}</button>
     <hr>
-    ${updateItem()}<button role="menuitem" disabled>${MI.info}${tr("版本")}<span class="mx-menu-val">${esc(st.version || "")}</span></button>
+    ${st.paused
+      ? `<button role="menuitem" data-me="resume">${MI.play}${tr("继续记录")}${st.paused_until ? `<span class="mx-menu-val">${tr("{t} 自动继续", { t: hm(st.paused_until) })}</span>` : ""}</button>`
+      : `<button role="menuitem" data-me="pause">${MI.pause}${tr("暂停记录")}<span class="mx-menu-val">${tr("1 小时")}</span></button>`}
     <hr>
+    ${updateItem(st.version || "")}
     <button role="menuitem" data-me="quit">${MI.quit}${tr("退出 Beayy")}</button>`;
 }
 
@@ -981,6 +988,7 @@ function toggleMe(open) {
   const menu = document.getElementById("me-menu"), btn = document.getElementById("me");
   if (!menu) return;
   menu.hidden = open === undefined ? !menu.hidden : !open;
+  if (menu.hidden && ME_CHECKED) { ME_CHECKED = false; renderMeMenu(); }
   btn.setAttribute("aria-expanded", String(!menu.hidden));
 }
 
@@ -990,8 +998,15 @@ NARROW.addEventListener("change", () => { if (S.status) renderSide(); });
 document.getElementById("me").onclick = (e) => { e.stopPropagation(); if (NARROW.matches) { location.hash = "#/settings"; return; } toggleMe(); };
 document.getElementById("me-menu").onclick = async (e) => {
   const b = e.target.closest("[data-me]"); if (!b) return;
-  toggleMe(false);
   const k = b.dataset.me;
+  if (k === "check") {
+    e.stopPropagation();
+    UP_CLICK = true; renderMeMenu();
+    try { S.update = await call("update_check"); } catch (x) {}
+    UP_CLICK = false; ME_CHECKED = true; renderSide(); updatePrompt(); pollUpdate();
+    return;
+  }
+  toggleMe(false);
   if (k === "settings") { if (S.page !== "settings") location.hash = "#/settings"; }
   else if (k === "devices") { SS.tab = "data"; if (S.page === "settings") renderSettings(); else location.hash = "#/settings"; }
   else if (k === "profile") profileDialog();
@@ -2687,21 +2702,21 @@ function syncPanel(sy) {
   if (cur === "none") return section(tr("同步"), cards + msg);
   // 旧版配对码账号、登录失效：先把这件事办了
   if (cur === "server" && !sy.email) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("邮箱和主密码"), tr("旧版配对码账号，设好邮箱和主密码就能在别的设备登录"), btn("ac-claim", tr("设好账号")))}</div>` + msg);
-  if (sy.need_login) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("登录已失效"), tr("登录已失效，重新登录后接着同步"), btn("ac-login", tr("重新登录")))}</div>` + msg);
+  if (sy.need_login) return section(tr("同步"), cards + `<div class="rows">${setRow(tr("登录已失效"), tr("重新登录后接着同步"), btn("ac-login", tr("重新登录")))}</div>` + msg);
   const pg = sy.progress || {}, busy = sy.running || DS.busy, going = busy && pg.phase && pg.total > 0;
   const bar = going ? `<div class="sync-bar-row"><div class="sync-prog"><div class="sync-prog-text"><span>${pg.phase === "upload" ? tr("上传") : tr("下载")}</span><span class="mono">${tr("{a} / {b} 段", { a: numText(pg.done), b: numText(pg.total) })}</span></div><div class="bar"><i style="width:${Math.min(100, Math.round((pg.done / pg.total) * 100))}%"></i></div></div></div>` : "";
   const state = busy ? `<span class="mx-status">${tr("同步中…")}</span>` : sy.last_error ? `<span class="mx-status mx-status--warn">${tr("上次有错")}</span>` : `<span class="mx-status mx-status--ok">${tr("已开{last}", { last: sy.last ? tr(" · 上次 {t}", { t: whenAt(sy.last) }) : "" })}</span>`;
   const target = { server: hostOf(sy.server || ""), folder: tildePath(sy.folder), webdav: hostOf(sy.webdav || "") }[cur] || "";
   const sessions = (DS.account && DS.account.sessions) || [];
   const leave = cur === "server"
-    ? setRow(esc(sy.email), tr("别的设备用这个邮箱登录"), AC.confirmLogout ? confirm(tr("退出登录")) : btn("ac-logout", tr("退出登录")))
-      + (sessions.length ? setRow(tr("登录着的设备"), "", `<button class="mx-btn mx-btn--text mx-btn--sm" id="sess-open">${tr("{n} 台", { n: sessions.length })}${ICON.chevR}</button>`) : "")
+    ? setRow(tr("账号"), `${esc(sy.email)} · ${tr("别的设备用这个邮箱登录")}`, AC.confirmLogout ? confirm(tr("退出登录")) : btn("ac-logout", tr("退出登录")))
+      + (sessions.length ? setRow(tr("已登录设备"), "", `<button class="mx-btn mx-btn--text mx-btn--sm" id="sess-open">${tr("{n} 台", { n: sessions.length })}${ICON.chevR}</button>`) : "")
     : "";
   return section(tr("同步"), cards + `<div class="rows">`
     + setRow(wayName(cur), `${target ? `<span class="mono">${esc(target)}</span>` : ""}${target && DS.done ? "<br>" : ""}${DS.done ? esc(DS.done) : ""}`, `<span class="btns">${state}<button class="mx-btn mx-btn--secondary mx-btn--sm" id="sync-now" ${busy ? "disabled" : ""}>${tr("立即同步")}</button></span>`)
     + bar + (sy.last_error ? `<div class="mx-error">${esc(sy.last_error)}</div>` : "")
     + leave
-    + setRow(tr("主密码"), cur === "server" ? tr("只在设备上用，不会发给服务器。") : gap(tr("加入同步时要输，{where}读不到内容", { where: wayName(cur) })), btn("ac-password", tr("改主密码")))
+    + setRow(tr("主密码"), cur === "server" ? tr("只在设备上用，不会发给服务器") : gap(tr("加入同步时要输，{where}读不到内容", { where: wayName(cur) })), btn("ac-password", tr("更改")))
     + setRow(tr("恢复码"), tr("忘了主密码、设备全丢了，凭它解开记录"), btn("ac-show-code", tr("查看")))
     + `</div>` + msg);
 }
@@ -3293,13 +3308,13 @@ function aiBody(cf, st) {
   const mobile = !!st.mobile, official = cf.model_mode === "official", ks = cf.api_key_source;
   const used30 = SS.usage && !SS.usage.error ? (SS.usage.days || []).reduce((a, d) => a + d.in + d.out, 0) : null;
   const model = official ? [tr("官方"), officialDesc(SS.llm && SS.llm.llm, tokText)].filter(Boolean).join(" · ")
-    : `${tr("自己的网关")} · <span class="mono">${esc(hostOf(cf.gateway))} · ${esc(cf.model_segment || tr("没填模型"))}</span> · ${ks ? tr("密钥已存") : tr("没有密钥")}${used30 != null ? ` · ${tr("近 30 天 {n}", { n: tokText(used30) })}` : ""}`;
+    : `${tr("自己的")} · <span class="mono">${esc(hostOf(cf.gateway))} · ${esc(cf.model_segment || tr("没填模型"))}</span> · ${ks ? tr("密钥已存") : tr("没有密钥")}${used30 != null ? ` · ${tr("近 30 天 {n}", { n: tokText(used30) })}` : ""}`;
   const login = official && SS.llm && SS.llm.error && ["none", "server"].includes(syncWay(S.sync)) ? smallBtn("ac-login", tr("登录")) : "";
   const seg = (id, list, cur) => `<div class="mx-seg" role="tablist" id="${id}">${list.map(([k, v]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
-  return section(tr("写总结"), setRow(tr("模型"), model, `<span class="btns">${mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm" id="c-usage">${tr("用量")}</button>`}${login}${smallBtn("c-model", tr("设置"))}</span>`)
-      + setRow(tr("总结的语言"), "", seg("sum-lang", SUM_LANGS, cf.summary_language || ""))
+  return section(tr("总结"), setRow(tr("模型"), model, `<span class="btns">${mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm" id="c-usage">${tr("用量")}</button>`}${login}${smallBtn("c-model", tr("更改"))}</span>`)
+      + setRow(tr("语言"), "", seg("sum-lang", SUM_LANGS, cf.summary_language || ""))
       + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), seg("roast", ROASTS, cf.roast || "off")))
-    + (mobile ? "" : section(tr("接到别的 AI"), setRow("Claude、Cursor", tr("让本机的 AI 读你的记录，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
+    + (mobile ? "" : section(tr("连接"), setRow(tr("本机 AI 工具"), tr("Claude、Cursor 能读你的记录，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
 }
 
 /** 设置「手机与手表」页的服务：手表录音转文字、停留点取名用的地图（用官方的写本月用量） */
@@ -3308,10 +3323,11 @@ function servicesRows(cf, st) {
   const L = SS.llm || {};
   const amap = cf.has_amap_key && cf.has_amap_js ? tr("Key 已存") : cf.has_amap_key ? tr("缺地图 Key") : tr("还没有 Key");
   const minutes = (sec) => tr("{n} 分钟", { n: numText(Math.round(sec / 60)) }), calls = (n) => tr("{n} 次", { n: numText(n) });
-  const asr = [asrOfficial ? tr("官方") : `${tr("自建")} · <span class="mono">${esc(hostOf(cf.transcribe_server))}</span>`, asrOfficial ? officialDesc(L.asr, minutes) : "", tr("你叫「{name}」", { name: esc(cf.speaker_name) })].filter(Boolean).join(" · ")
+  const asr = [asrOfficial ? tr("官方") : `${tr("自己的")} · <span class="mono">${esc(hostOf(cf.transcribe_server))}</span>`, asrOfficial ? officialDesc(L.asr, minutes) : "", tr("你叫「{name}」", { name: esc(cf.speaker_name) })].filter(Boolean).join(" · ")
     + (st.cloud_sync ? `<br>${esc(st.cloud_sync)}` : "");
-  const map = osm ? tr("OpenStreetMap · 免费，不用 Key") : [tr("高德地图"), mapOfficial ? tr("官方") : `${tr("自己的 Key")} · ${amap}`, mapOfficial ? officialDesc(L.map, calls) : ""].filter(Boolean).join(" · ");
-  return setRow(tr("转写服务"), asr, smallBtn("c-asr", tr("设置"))) + setRow(tr("地图"), map, smallBtn("c-amap", tr("设置")));
+  // 说明都按「谁的 · 用的什么 · 状态」排
+  const map = osm ? tr("OpenStreetMap · 免费，不用 Key") : [mapOfficial ? tr("官方") : tr("自己的"), tr("高德地图"), mapOfficial ? officialDesc(L.map, calls) : amap].filter(Boolean).join(" · ");
+  return setRow(tr("录音转写"), asr, smallBtn("c-asr", tr("更改"))) + setRow(tr("地图"), map, smallBtn("c-amap", tr("更改")));
 }
 
 async function renderSettings() {
@@ -3345,24 +3361,24 @@ async function renderSettings() {
   if (tab === "general") {
     // 电脑上个人资料在左下角菜单里改；手机没有那个菜单，放这里
     body = (mobile ? section(tr("个人资料"), profileRow()) : "")
-      + section(tr("通用"), (mobile ? "" : setRow(tr("开机自动启动"), tr("登录电脑后自动开始记录"), `<button class="mx-switch" role="switch" id="login" aria-checked="${!!st.login_item}" aria-label="${tr("开机自动启动")}"></button>`))
+      + group((mobile ? "" : setRow(tr("开机启动"), "", `<button class="mx-switch" role="switch" id="login" aria-checked="${!!st.login_item}" aria-label="${tr("开机启动")}"></button>`))
         + setRow(tr("主题"), "", `<div class="mx-seg" role="tablist" id="theme">${THEMES.map(([k, v]) => `<button role="tab" aria-selected="${k === theme}" class="${k === theme ? "is-on" : ""}" data-theme="${k}">${v}</button>`).join("")}</div>`)
         + setRow(tr("语言"), "", `<div class="mx-seg" role="tablist" id="lang">${LANGS.map(([k, v]) => `<button role="tab" aria-selected="${k === langPref}" class="${k === langPref ? "is-on" : ""}" data-lang="${k}">${v}</button>`).join("")}</div>`)
         + (mobile ? "" : setRow(tr("字体"), fontDesc(), smallBtn("font-edit", tr("更改")))))
-      + (mobile ? section(tr("关于"), setRow(tr("版本 {v}", { v: esc(st.version || "") }), tr("手机版跟着 TestFlight 更新"), "")) : aboutSection());
+      + (mobile ? section(tr("关于"), setRow(tr("版本"), `${esc(st.version || "")} · ${tr("跟着 TestFlight 更新")}`, "")) : aboutSection());
   } else if (tab === "record") {
     const pause = st.paused
-      ? setRow(tr("已暂停"), st.paused_until ? tr("到 {t} 自动继续", { t: hm(st.paused_until) }) : tr("一直暂停，点继续才恢复"), smallBtn("pause-off", tr("继续记录")))
-      : setRow(tr("暂停记录"), tr("暂停后不记录"), smallBtn("pause-open", tr("暂停")));
+      ? setRow(tr("暂停记录"), st.paused_until ? tr("已暂停，到 {t} 自动继续", { t: hm(st.paused_until) }) : tr("已暂停，点继续才恢复"), smallBtn("pause-off", tr("继续")))
+      : setRow(tr("暂停记录"), "", smallBtn("pause-open", tr("暂停")));
     const block = `<div class="block"><div><div class="mx-setting-name">${tr("不记录的 app")}</div><div class="mx-setting-desc">${tr("在前台时只记用了多久，不记内容")}</div></div>
         ${cf.blocklist.length ? `<div class="mx-chips" id="chips">${cf.blocklist.map((b, i) => `<button class="mx-chip" data-i="${i}" title="${tr("移出")}">${esc(b)}${ICON.close}</button>`).join("")}</div>` : ""}
         <div class="inline"><input class="mx-input mono" id="block-new" placeholder="${tr("app 名或 bundle id，比如 1Password")}" aria-label="${tr("不记录的 app")}"><button class="mx-btn mx-btn--secondary" id="block-add">${tr("加入")}</button></div></div>`;
-    const del = setRow(tr("删除最近的记录"), SS.deleted != null ? tr("刚删掉 {n} 条", { n: SS.deleted }) : tr("比如刚输过的私人内容"), smallBtn("del-open", tr("删除")));
-    body = section(tr("记录"), pause + block) + section(tr("隐私"), del);
+    const del = setRow(tr("删除最近记录"), SS.deleted != null ? tr("刚删掉 {n} 条", { n: SS.deleted }) : tr("比如刚输过的私人内容"), smallBtn("del-open", tr("删除")));
+    body = group(pause + block + del);
   } else if (tab === "ai") {
     body = aiBody(cf, st);
   } else if (tab === "phone") {
-    body = (mobile ? phoneSection() : "") + section(mobile ? tr("服务") : tr("手机与手表"), servicesRows(cf, st));
+    body = (mobile ? phoneSection() : "") + (mobile ? section(tr("服务"), servicesRows(cf, st)) : group(servicesRows(cf, st)));
   } else {
     body = syncPanel(sy) + devicesPanel(devs || [], st) + (SS.storage ? storageView(SS.storage) : "");
   }
@@ -3504,17 +3520,17 @@ function storageView(d) {
   if (d.error) return section(tr("数据"), `<div class="mx-field-error">${esc(d.error)}</div>`);
   const table = (rows, cols) => `<table class="mx-table store"><thead><tr>${cols.map((c) => `<th${c[2] ? ' class="num"' : ""}>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td${c[2] ? ' class="num mono"' : ""}>${c[1](r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   const L = d.local, C = d.cloud, T = d.transcribe;
-  const local = section(tr("本机"), setRow(tr("数据目录"), `<span class="mono">${esc((L.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span> · ${tr("共 {size}", { size: bytesText(L.total) })}`, (S.status && S.status.mobile ? "" : smallBtn("open-dir", tr("在访达中打开"))))
+  const local = section(tr("本机存储"), setRow(tr("数据目录"), `<span class="mono">${esc((L.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span> · ${tr("共 {size}", { size: bytesText(L.total) })}`, (S.status && S.status.mobile ? "" : smallBtn("open-dir", tr("在访达中打开"))))
     + table(L.items, [[tr("内容"), (r) => esc(r.name)], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(r.keep)]]), { aside: tr("全部数据，以这里为准") });
-  const cloud = section(tr("同步服务"), C.error ? emptyInline(C.error)
-    : `<p class="note" style="margin:0 0 var(--space-3)"><span class="mono">${esc(hostOf(C.server))}</span> · ${tr("共 {size}", { size: bytesText(C.total) })}</p>`
+  const cloud = section(tr("同步服务存储"), C.error ? emptyInline(C.error)
+    : setRow(tr("地址"), `<span class="mono">${esc(hostOf(C.server))}</span> · ${tr("共 {size}", { size: bytesText(C.total) })}`, "")
       + table(C.items, [[tr("内容"), (r) => esc(r.name)], [tr("块数"), (r) => numText(r.count), 1], [tr("大小"), (r) => bytesText(r.bytes), 1], [tr("留多久"), (r) => esc(r.keep)]]));
   const jobs = T.jobs ? Object.entries(T.jobs).map(([k, n]) => `${{ queued: tr("排队"), running: tr("在转"), done: tr("转好待取"), failed: tr("失败") }[k] || k} ${n}`).join(tr("、")) : "";
-  const asr = section(tr("转写服务"), T.error ? `<p class="note" style="margin:0"><span class="mono">${esc(hostOf(T.server))}</span></p>${emptyInline(T.error)}`
-    : setRow(`<span class="mono">${esc(hostOf(T.server))}</span>`, `${jobs || tr("没有你的任务")} · ${tr("占 {size}", { size: bytesText(T.bytes) })}`, `<span class="note">${esc(T.keep)}</span>`));
+  const asr = section(tr("转写服务存储"), T.error ? `<p class="note" style="margin:0"><span class="mono">${esc(hostOf(T.server))}</span></p>${emptyInline(T.error)}`
+    : setRow(tr("地址"), `<span class="mono">${esc(hostOf(T.server))}</span> · ${jobs || tr("没有你的任务")} · ${tr("占 {size}", { size: bytesText(T.bytes) })}`, `<span class="note">${esc(T.keep)}</span>`));
   const repo = !(d.repo || (S.settings && S.settings.repo_path)) ? "" : section(tr("人生记录仓库"), setRow(d.repo ? `<span class="mono">${esc((d.repo.path || "").replace(/^\/Users\/[^/]+/, "~"))}</span>` : tr("没填"),
     d.repo ? `raw/ ${tr("共 {size}", { size: bytesText(d.repo.bytes) })} · ${esc(d.repo.keep)}` : tr("日数据包和日总结的文件夹"), smallBtn("repo-edit", tr("更改"))));
-  return local + cloud + asr + repo + `<p class="note">${d.at ? tr("{t} 取的，开着这一页每分钟更新。", { t: hm(new Date(d.at).toISOString()) }) : ""}</p>`;
+  return local + cloud + asr + repo + `<p class="note">${d.at ? tr("{t} 更新", { t: hm(new Date(d.at).toISOString()) }) : ""}</p>`;
 }
 
 /** 模型：官方（按账号开通，经同步服务代调，不用填密钥）或自己的网关（地址、模型、密钥；地址和模型有默认值，密钥不预填） */

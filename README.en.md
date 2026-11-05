@@ -65,7 +65,7 @@ Beayy ships a local MCP server. Connect it to Claude Code, Claude Desktop or Cur
 claude mcp add beayy -- "/Applications/Beayy.app/Contents/MacOS/beayy" --mcp
 ```
 
-The config snippet for Claude Desktop and Cursor is under Settings → AI → Connect to other AI. Tools: `list_days` (an overview of recent days), `get_day` (time spent, what you did each hour, where the time went, and the journal for a day), `search` (keyword search over the 10-minute summaries), `get_rules_and_projects`.
+The config snippet for Claude Desktop and Cursor is under Settings → AI → Connections. Tools: `list_days` (an overview of recent days), `get_day` (time spent, what you did each hour, where the time went, and the journal for a day), `search` (keyword search over the 10-minute summaries), `get_rules_and_projects`.
 
 <p align="center"><img src="docs/images/mcp.png" alt="Connect to AI" width="860"></p>
 
