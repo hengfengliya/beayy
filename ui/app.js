@@ -253,7 +253,8 @@ function remarkHtml(text) {
   const m = t.match(/^「([^」]{2,80})」\s*[（(]([^）)]{1,30})[）)][，,。\s]*(.*)$/s)
     || t.match(/^[“"]?([^「」“”"（(]{2,40}?)[」”"]?\s*[（(]([^）)《]{0,12}《[^）)]{1,30})[）)][，,。\s]*(.*)$/s);
   if (!m) return `<blockquote class="remark"><p>${esc(text)}</p></blockquote>`;
-  return `<blockquote class="remark"><p class="rm-quote">「${esc(m[1])}」<span class="rm-src">${esc(m[2])}</span></p>${m[3] ? `<p>${esc(m[3])}</p>` : ""}</blockquote>`;
+  const [l, r] = LANG === "zh" ? ["「", "」"] : ["“", "”"];
+  return `<blockquote class="remark"><p class="rm-quote">${l}${esc(m[1])}${r}<span class="rm-src">${esc(m[2])}</span></p>${m[3] ? `<p>${esc(m[3])}</p>` : ""}</blockquote>`;
 }
 
 /** 按 ## 切日总结：开头的引用块是口径说明 */

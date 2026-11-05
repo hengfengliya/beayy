@@ -7,11 +7,11 @@
 **自动记下你的一天：几点、在哪、在做什么**
 
 电脑、手机、手表一起记，去过的地方也记。<br>
-每 10 分钟写一段摘要，每晚写一份日总结，再汇成周和月。
+边记边写摘要，每晚写一份日总结，再汇成周和月。
 
 *Be Authentic. Your Yesterdays.*
 
-*Beayy records your day on Mac, Windows and iPhone — when, where, and what you were doing — and writes the journal for you. Local-first, open source, self-hostable.*
+*Beayy records your day on Mac, Windows, iPhone and Android — when, where, and what you were doing — and writes the journal for you. Local-first, open source, self-hostable.*
 
 **简体中文** · [English](README.en.md)
 
@@ -19,7 +19,7 @@
 [![Downloads](https://img.shields.io/github/downloads/hengfengliya/beayy/total?label=%E4%B8%8B%E8%BD%BD%E9%87%8F&color=0b0b0b)](https://github.com/hengfengliya/beayy/releases)
 [![Stars](https://img.shields.io/github/stars/hengfengliya/beayy?color=0b0b0b)](https://github.com/hengfengliya/beayy/stargazers)
 [![License](https://img.shields.io/github/license/hengfengliya/beayy?color=0b0b0b)](LICENSE)
-![Platform](https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Windows%2010%2F11%20%C2%B7%20iPhone-0b0b0b)
+![Platform](https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Windows%2010%2F11%20%C2%B7%20iPhone%20%C2%B7%20Android-0b0b0b)
 [![LINUX DO](https://img.shields.io/badge/LINUX-DO-FFB003.svg?logo=data:image/svg%2bxml;base64,DQo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik00Ni44Mi0uMDU1aDYuMjVxMjMuOTY5IDIuMDYyIDM4IDIxLjQyNmM1LjI1OCA3LjY3NiA4LjIxNSAxNi4xNTYgOC44NzUgMjUuNDV2Ni4yNXEtMi4wNjQgMjMuOTY4LTIxLjQzIDM4LTExLjUxMiA3Ljg4NS0yNS40NDUgOC44NzRoLTYuMjVxLTIzLjk3LTIuMDY0LTM4LjAwNC0yMS40M1EuOTcxIDY3LjA1Ni0uMDU0IDUzLjE4di02LjQ3M0MxLjM2MiAzMC43ODEgOC41MDMgMTguMTQ4IDIxLjM3IDguODE3IDI5LjA0NyAzLjU2MiAzNy41MjcuNjA0IDQ2LjgyMS0uMDU2IiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZWNlY2VjO2ZpbGwtb3BhY2l0eToxIi8+PHBhdGggZD0iTTQ3LjI2NiAyLjk1N3EyMi41My0uNjUgMzcuNzc3IDE1LjczOGE0OS43IDQ5LjcgMCAwIDEgNi44NjcgMTAuMTU3cS00MS45NjQuMjIyLTgzLjkzIDAgOS43NS0xOC42MTYgMzAuMDI0LTI0LjM4N2E2MSA2MSAwIDAgMSA5LjI2Mi0xLjUwOCIgc3R5bGU9InN0cm9rZTpub25lO2ZpbGwtcnVsZTpldmVub2RkO2ZpbGw6IzE5MTkxOTtmaWxsLW9wYWNpdHk6MSIvPjxwYXRoIGQ9Ik03Ljk4IDcwLjkyNmMyNy45NzctLjAzNSA1NS45NTQgMCA4My45My4xMTNRODMuNDI2IDg3LjQ3MyA2Ni4xMyA5NC4wODZxLTE4LjgxIDYuNTQ0LTM2LjgzMi0xLjg5OC0xNC4yMDMtNy4wOS0yMS4zMTctMjEuMjYyIiBzdHlsZT0ic3Ryb2tlOm5vbmU7ZmlsbC1ydWxlOmV2ZW5vZGQ7ZmlsbDojZjlhZjAwO2ZpbGwtb3BhY2l0eToxIi8+PC9zdmc+)](https://linux.do/t/topic/3081565)
 
 [下载 Mac / Windows / 安卓版](https://github.com/hengfengliya/beayy/releases/latest) · [iPhone 和手表（TestFlight）](https://testflight.apple.com/join/Ptzqu4q8) · [beayy.com](https://beayy.com)
@@ -30,6 +30,13 @@
 
 每天晚上回想「今天到底干了啥」，常常想不起来。屏幕使用时间只告诉你用了几小时 Chrome，说不清在 Chrome 里做了什么。Beayy 在后台记下电脑、手机和手表上的事，让模型替你写流水账，你只管看。
 
+## 电脑和手机，同一套界面
+
+电脑版（Mac、Windows）是记录和写总结的那一端；iPhone、安卓 app 记下手机上的事，也能随时看电脑同步过来的今天、时间线和总结；Apple Watch 全天录音。界面有简体中文和英文。
+
+<p align="center"><img src="docs/images/devices.png" alt="电脑和手机" width="860"></p>
+<p align="center"><img src="docs/images/phone.png" alt="手机 app：今天、地点、日总结" width="860"></p>
+
 ## 一天的形状
 
 在电脑前多久、手机多久、切了多少次 app、去了几个地方。「一天」按小时排开地点、睡眠、电脑、手机和说话，时间按项目和类型归好类。
@@ -38,9 +45,9 @@
 
 <p align="center"><img src="docs/images/today.png" alt="今天页" width="860"></p>
 
-## 每 10 分钟一段
+## 每一段在做什么
 
-时间线按小时列出在做什么，点开一小时，能看到每 10 分钟的摘要、用了哪些 app、那会儿拿起手机做了什么。
+时间线按小时列出在做什么，点开一小时，能看到每一段的摘要、用了哪些 app、那会儿拿起手机做了什么。官方模型默认每小时写一段；自己配的模型可以细到每 10 分钟。
 
 <p align="center"><img src="docs/images/timeline.png" alt="时间线" width="860"></p>
 
@@ -72,13 +79,15 @@ Claude 桌面版、Cursor 的配置在「设置 → AI → 连接」，复制粘
 
 ## 数据在你手里
 
-记录全部存在本机。多台设备之间要同步，有三种方式：
+记录全部存在本机。多台设备之间要同步，任选一种，也可以不同步：
 
-- **官方服务器**：开放注册，不要邀请码，每个账号 100MB 同步空间，送官方模型每月 5 万 token，先开 50 个名额
+- **iCloud**：设备都是苹果的，不用注册
+- **网盘（WebDAV）**：坚果云、NAS 这类，安卓和 Windows 也能用，不用注册
+- **官方服务器**：开放注册，不要邀请码，每个账号 100MB 同步空间，先开 50 个名额；电脑屏幕上的文字不上传，只留在电脑上
 - **自己部署**：服务端代码在 [`server/`](server/README.md)，`docker compose up -d` 就能起
-- **同步文件夹**：选一个 iCloud 云盘、OneDrive、坚果云、Syncthing 这类会同步的文件夹，不经过任何服务器
+- **同步文件夹**（高级）：OneDrive、Syncthing 这类会同步的文件夹，电脑之间用
 
-不管哪种，记录都在本机压缩、加密后再传出去，服务器和网盘只拿到密文。不同步也能用。
+不管哪种，记录都在本机压缩、加密后再传出去，服务器和网盘只拿到密文。官方模型和同步方式分开：用 iCloud、网盘同步，也能另外登录 Beayy 账号用官方模型（每月送 5 万 token）。
 
 <p align="center"><img src="docs/images/sync.png" alt="同步方式" width="860"></p>
 
@@ -103,13 +112,13 @@ Claude 桌面版、Cursor 的配置在「设置 → AI → 连接」，复制粘
 
 iPhone 和 Apple Watch app 走 TestFlight 公开测试：https://testflight.apple.com/join/Ptzqu4q8 （源码在 [`ios/`](ios/)）。
 
-安卓 app（试用）：在 Releases 下载 `Beayy-<版本>-android.apk` 装上，登录和电脑同一个账号，在 设置 → 通用 → 这台手机 允许读取使用情况。现在记每个 app 用了多久，还不记位置（源码在 [`android/`](android/)）。
+安卓 app（预览）：在 Releases 下载 `Beayy-<版本>-android.apk` 装上，登录和电脑同一个账号（或连同一个网盘），在 设置 → 手机与手表 允许读取使用情况。现在记每个 app 用了多久，还不记位置（源码在 [`android/`](android/)）。
 
 要求 macOS 14 以上，或 Windows 10／11（64 位）。
 
 ## 还不支持的
 
-- Linux 电脑；安卓 app 还不记位置、没有正式签名
+- Linux 电脑；安卓 app 还不记位置、没有正式签名、不会自动更新
 - iPhone 的屏幕使用时间只能在 Mac 上读；只有 Windows 电脑的话，看不到手机用了哪些 app（位置不受影响）
 - Windows 版还在试用：没有代码签名，第一次运行 SmartScreen 会拦，点「更多信息 → 仍要运行」；杀毒软件可能把键盘钩子当成键盘记录器，放行即可；以管理员身份运行的程序读不到（Beayy 不提权）
 - 官方送的模型额度每月 5 万 token，只够试用（官方模型默认每小时一段摘要，一天也要几万 token），天天用要自己配模型；转写、地图不送
@@ -149,15 +158,15 @@ cd android && ./build.sh      # 出 app/build/outputs/apk/debug/app-debug.apk；
 | `crates/beayy-phone` | 读 iPhone 经 iCloud 同步来的屏幕使用时间（macOS） |
 | `crates/beayy-remote` | 从录音服务器拉手表对话转写和 iPhone 停留点（HTTPS＋口令） |
 | `crates/beayy-summary` | 10 分钟摘要、小时摘要、两级分类（类型、领域 · 项目）、项目名合并 |
-| `crates/beayy-sync` | 多设备同步客户端：账号、加密、上传下载、同步文件夹 |
+| `crates/beayy-sync` | 多设备同步客户端：账号、加密、上传下载；Beayy 服务、iCloud、WebDAV、同步文件夹 |
 | `src-tauri` | Tauri 2 外壳：菜单栏、主窗口、给网页的命令（`src-tauri/COMMANDS.md`）、定时任务、日周月总结、MCP 服务 |
-| `ui` | 网页界面：纯 HTML＋CSS＋JS，电脑和 iPhone 共用；简体中文和英文（`i18n.js`、`locales/`） |
+| `ui` | 网页界面：纯 HTML＋CSS＋JS，电脑、iPhone、安卓共用；简体中文和英文，一张译文表（`i18n.js`、`locales/en.js`） |
 | `mobile` | iPhone 版的 Rust 核心（静态库），直接编 `src-tauri` 的数据代码，和电脑同一份 |
 | `android` | 安卓 app 的 Kotlin 外壳：读每个 app 的使用时长、经 JNI 调同一个 Rust 核心；界面是网页视图加载 `ui/` |
 | `ios` | iPhone 和 Apple Watch app 的 Swift 外壳（XcodeGen）：定位记停留点、手表录音、登录账号加密上传；界面是网页视图加载 `ui/` |
 | `server` | 服务端：同步（只存密文）＋录音转写＋可选的模型、地图代理，Python（FastAPI＋SQLite＋本地文件）。用 Docker 在自己的电脑或服务器上跑，见 [`server/README.md`](server/README.md)；官方实例跑的也是它 |
 | `sync-server` | 同步服务的旧 Cloudflare 版（Workers＋R2＋D1），接口和 `server` 相同，不再维护 |
-| `docs/images` | README 里的图，界面里是虚构的样例数据 |
+| `docs/images` | README 里的图（英文版在 `en/`），界面里是虚构的样例数据 |
 
 </details>
 

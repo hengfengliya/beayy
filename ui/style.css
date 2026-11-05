@@ -707,7 +707,7 @@ a.mx-btn { text-decoration: none; }
 .daynav .dn-step { width: 28px; justify-content: center; padding: 0; }
 .daynav .dn-step:first-child { border-radius: 7px 0 0 7px; }
 .daynav .dn-step:nth-child(3) { border-radius: 0 7px 7px 0; }
-.daynav .dn-date { padding: 0 10px; border-left: 1px solid var(--line) !important; border-right: 1px solid var(--line) !important; color: var(--ink); font-variant-numeric: tabular-nums; }
+.daynav .dn-date { padding: 0 10px; border-left: 1px solid var(--line) !important; border-right: 1px solid var(--line) !important; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .daynav .mx-ico { width: 14px; height: 14px; }
 .dn-today { height: 30px; margin-right: 6px; }
 

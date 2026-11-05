@@ -7,7 +7,7 @@
 **Your day, written down automatically: when, where, and what you were doing**
 
 Your computer, phone and watch together, plus the places you went.<br>
-A summary every 10 minutes, a journal every evening, rolled up into weekly and monthly reviews.
+Summaries as you go, a journal every evening, rolled up into weekly and monthly reviews.
 
 *Be Authentic. Your Yesterdays.*
 
@@ -17,11 +17,11 @@ A summary every 10 minutes, a journal every evening, rolled up into weekly and m
 [![Downloads](https://img.shields.io/github/downloads/hengfengliya/beayy/total?label=downloads&color=0b0b0b)](https://github.com/hengfengliya/beayy/releases)
 [![Stars](https://img.shields.io/github/stars/hengfengliya/beayy?color=0b0b0b)](https://github.com/hengfengliya/beayy/stargazers)
 [![License](https://img.shields.io/github/license/hengfengliya/beayy?color=0b0b0b)](LICENSE)
-![Platform](https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Windows%2010%2F11%20%C2%B7%20iPhone-0b0b0b)
+![Platform](https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Windows%2010%2F11%20%C2%B7%20iPhone%20%C2%B7%20Android-0b0b0b)
 
 [Download for Mac / Windows / Android](https://github.com/hengfengliya/beayy/releases/latest) · [iPhone & Apple Watch (TestFlight)](https://testflight.apple.com/join/Ptzqu4q8) · [beayy.com](https://beayy.com)
 
-<img src="docs/images/hero.gif" alt="Beayy Today view: the shape of a day" width="860">
+<img src="docs/images/en/devices.png" alt="Beayy on the computer and the phone" width="860">
 
 </div>
 
@@ -29,25 +29,31 @@ At the end of a busy day it's hard to remember what you actually did. Screen Tim
 
 The interface comes in English and Simplified Chinese (Settings → General → Language; it follows your system by default). Summaries and journals follow the interface language, or set it under Settings → AI → Language. The screenshots below use made-up sample data.
 
+## One interface on your computer and your phone
+
+The desktop app (Mac, Windows) records and writes the summaries. The iPhone and Android apps record what happens on your phone and show the day, timeline and journals synced from your computer. Apple Watch records audio all day.
+
+<p align="center"><img src="docs/images/en/phone.png" alt="Phone app: Today, Places, daily journal" width="860"></p>
+
 ## The shape of your day
 
 How long you were at the computer, how long on your phone, how many times you switched apps, how many places you went. The day strip lays out places, sleep, computer, phone and conversations hour by hour, and your time is sorted by project and by type of work.
 
 With the iPhone app you can also bring in Apple Health: when you fell asleep and woke up, how long you slept, how many steps you took and how long you worked out.
 
-<p align="center"><img src="docs/images/today.png" alt="Today view" width="860"></p>
+<p align="center"><img src="docs/images/en/today.png" alt="Today view" width="860"></p>
 
-## Every 10 minutes
+## What you were doing, piece by piece
 
-The timeline lists what you were doing each hour. Open an hour to see a summary for every 10 minutes, the apps you used, and what you did when you picked up your phone.
+The timeline lists what you were doing each hour. Open an hour to see the summary of each stretch, the apps you used, and what you did when you picked up your phone. The official model writes one summary an hour by default; with your own model it can go down to every 10 minutes.
 
-<p align="center"><img src="docs/images/timeline.png" alt="Timeline" width="860"></p>
+<p align="center"><img src="docs/images/en/timeline.png" alt="Timeline" width="860"></p>
 
 ## Where you went
 
 With the iPhone app, Beayy records the places you stayed, when you arrived and left, and guesses which shop or café it was. Name the places you go often. It keeps stops only, never the route in between.
 
-<p align="center"><img src="docs/images/places.png" alt="Places" width="860"></p>
+<p align="center"><img src="docs/images/en/places.png" alt="Places" width="860"></p>
 
 ## Daily, weekly and monthly reviews
 
@@ -55,7 +61,7 @@ Every evening Beayy writes a journal entry: one line about the day, a short rema
 
 Write rules in your own words, such as "no computer after 22:00" or "less than 3 hours of phone a day", and the journal checks the day against them.
 
-<p align="center"><img src="docs/images/summary-day.png" alt="Daily journal" width="860"></p>
+<p align="center"><img src="docs/images/en/summary-day.png" alt="Daily journal" width="860"></p>
 
 ## Ask your own past
 
@@ -67,19 +73,21 @@ claude mcp add beayy -- "/Applications/Beayy.app/Contents/MacOS/beayy" --mcp
 
 The config snippet for Claude Desktop and Cursor is under Settings → AI → Connections. Tools: `list_days` (an overview of recent days), `get_day` (time spent, what you did each hour, where the time went, and the journal for a day), `search` (keyword search over the 10-minute summaries), `get_rules_and_projects`.
 
-<p align="center"><img src="docs/images/mcp.png" alt="Connect to AI" width="860"></p>
+<p align="center"><img src="docs/images/en/mcp.png" alt="Connect to AI" width="860"></p>
 
 ## Your data stays yours
 
-Everything is stored on your computer. To sync between devices, pick one of three options:
+Everything is stored on your computer. To sync between devices, pick one, or don't sync at all:
 
-- **Official server**: open sign-up, no invite code, 100 MB of sync space and 50,000 tokens of the official model per month per account, 50 accounts for now
+- **iCloud**: all-Apple devices, no sign-up
+- **Cloud drive (WebDAV)**: Nextcloud, a NAS and the like; works with Android and Windows too, no sign-up
+- **Official server**: open sign-up, no invite code, 100 MB of sync space per account, 50 accounts for now; on-screen text from your computer is never uploaded
 - **Self-hosted**: the server lives in [`server/`](server/README.md); `docker compose up -d` gets it running
-- **Sync folder**: pick a folder that iCloud Drive, OneDrive, Dropbox, Syncthing or a NAS already syncs; no server involved
+- **Sync folder** (advanced): a folder OneDrive, Dropbox or Syncthing already syncs, between computers
 
-Either way, records are compressed and encrypted on your device before they leave it, so the server or cloud drive only ever sees ciphertext. Sync is optional.
+Either way, records are compressed and encrypted on your device before they leave it, so the server or cloud drive only ever sees ciphertext. The official model is separate from sync: with iCloud or WebDAV you can still sign in to a Beayy account for the official model (50,000 tokens a month free).
 
-<p align="center"><img src="docs/images/sync.png" alt="Sync options" width="860"></p>
+<p align="center"><img src="docs/images/en/sync.png" alt="Sync options" width="860"></p>
 
 ## What it records and where it lives
 
@@ -100,13 +108,13 @@ Download `Beayy-<version>.dmg` from [Releases](https://github.com/hengfengliya/b
 
 The iPhone and Apple Watch apps are in public TestFlight: https://testflight.apple.com/join/Ptzqu4q8 (source in [`ios/`](ios/)).
 
-Android app (preview): download `Beayy-<version>-android.apk` from Releases, sign in with the same account as your computer, and allow usage access under Settings → General → This phone. It records how long you use each app; location is not recorded yet (source in [`android/`](android/)).
+Android app (preview): download `Beayy-<version>-android.apk` from Releases, sign in with the same account as your computer (or connect the same WebDAV drive), and allow usage access under Settings → Phone and watch. It records how long you use each app; location is not recorded yet (source in [`android/`](android/)).
 
 Requires macOS 14 or later, or Windows 10/11 (64-bit).
 
 ## Not supported yet
 
-- Linux computers; the Android app does not record location yet and is not release-signed
+- Linux computers; the Android app does not record location yet, is not release-signed and doesn't update itself
 - iPhone Screen Time can only be read on a Mac. With only a Windows computer you won't see which phone apps you used (location still works)
 - The Windows build is still a preview. It isn't code-signed, so SmartScreen blocks the first run; choose "More info → Run anyway". Antivirus software may flag the keyboard hook as a keylogger; allow it. Apps running as administrator can't be read (Beayy doesn't elevate)
 - The official model allowance is 50,000 tokens a month, enough to try Beayy out (the official model summarizes once an hour by default, which still takes tens of thousands of tokens a day). For daily use, bring your own model. Transcription and maps aren't included
@@ -146,15 +154,15 @@ UI only: open `ui/index.html` in a browser. It reads the made-up sample data in 
 | `crates/beayy-phone` | Reads iPhone Screen Time synced through iCloud (macOS) |
 | `crates/beayy-remote` | Pulls watch transcripts and iPhone stops from the recording server (HTTPS + token) |
 | `crates/beayy-summary` | 10-minute and hourly summaries, two-level classification (type; area · project), project name merging |
-| `crates/beayy-sync` | Multi-device sync client: account, encryption, upload and download, sync folder |
+| `crates/beayy-sync` | Multi-device sync client: account, encryption, upload and download; Beayy server, iCloud, WebDAV, sync folder |
 | `src-tauri` | Tauri 2 shell: menu bar, main window, commands for the web UI (`src-tauri/COMMANDS.md`), scheduled jobs, daily/weekly/monthly reviews, MCP server |
-| `ui` | Web UI in plain HTML, CSS and JS, shared by the computer and the iPhone; English and Simplified Chinese (`i18n.js`, `locales/`) |
+| `ui` | Web UI in plain HTML, CSS and JS, shared by the computer, iPhone and Android; English and Simplified Chinese from one translation table (`i18n.js`, `locales/en.js`) |
 | `mobile` | Rust core for iPhone (static library), built from the same data code as `src-tauri` |
 | `android` | Kotlin shell for the Android app: reads per-app usage and calls the same Rust core over JNI; the UI is a web view loading `ui/` |
 | `ios` | Swift shells for the iPhone and Apple Watch apps (XcodeGen): location stops, watch recording, encrypted upload; the UI is a web view loading `ui/` |
 | `server` | Server: sync (ciphertext only) + transcription + optional model and map proxies, in Python (FastAPI + SQLite + local files). Run it with Docker on your own computer or server, see [`server/README.md`](server/README.md); the official instance runs the same code |
 | `sync-server` | The old Cloudflare sync server (Workers + R2 + D1), same API as `server`, no longer maintained |
-| `docs/images` | Images for this README, showing made-up sample data |
+| `docs/images` | Images for the READMEs (English ones in `en/`), showing made-up sample data |
 
 </details>
 
