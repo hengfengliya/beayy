@@ -1,3 +1,5 @@
+//! 游戏：英雄联盟（本文件）和 Steam（steam.rs），受「游戏」开关管，默认开。
+//!
 //! 英雄联盟：从客户端的本机接口（LCU）记每一局。
 //!
 //! 只发 GET：不接受对局、不改设置、不读游戏内存、不碰对局进程。客户端没开就什么都不做。
@@ -8,6 +10,8 @@
 //!   `game.match`（一局，摘要字段＋`raw` 接口原样，timestamp＝对局开始时刻）、`game.rank`（段位变了才记）
 //! - 去重：`<数据目录>/games/seen.json` 记写过的 gameId；每次连上翻最近的对局列表，没记过的补写
 //! - 暂停记录时不写；暂停期间结束的对局不记成已写，下次连上补
+
+pub mod steam;
 
 use base64::Engine;
 use beayy_core::{data_root, fields, iso, EventLog};
@@ -597,17 +601,19 @@ impl Watch {
     }
 }
 
-/// 起后台线程：找客户端、记阶段和每一局
-/// 设置 → 功能 → 游戏（settings.json 的 games），默认关
+/// 设置 → 功能 → 游戏（settings.json 的 games），默认开：没存过这一项就算开
 pub fn enabled() -> bool {
     std::fs::read_to_string(beayy_core::default_root().join("settings.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| v["games"].as_bool())
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
+/// 起后台线程：找客户端、记阶段和每一局；Steam 另起一根
 pub fn start(log: Arc<EventLog>, paused: Arc<AtomicBool>) {
+    // Steam 自己一根线：每 30 秒看注册表，跟英雄联盟的轮询节奏不同
+    steam::start(log.clone(), paused.clone());
     std::thread::spawn(move || {
         let mut w = Watch::new(&data_root(), log, paused);
         loop {

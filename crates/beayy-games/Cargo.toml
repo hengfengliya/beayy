@@ -13,5 +13,5 @@ base64 = "0.22"
 ureq = { version = "3", default-features = false, features = ["json", "native-tls"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# 找客户端进程和它的程序路径；和 beayy-capture 同一版本
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+# 找客户端进程和它的程序路径、读 Steam 的注册表；和 beayy-capture 同一版本
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_Registry"] }

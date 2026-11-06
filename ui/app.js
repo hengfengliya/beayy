@@ -99,6 +99,7 @@ async function callRaw(cmd, args = {}) {
       return null;
     }
     case "get_game": { const all = await loadMock("get_game").catch(() => ({})); return all[args.id] || null; }
+    case "games_overview": { const all = await loadMock(cmd); return all[args.game] || all[all.default]; }
     case "pick_bill_files": return [];
     case "set_bill_class": case "rebuild_bills": console.info(`样例模式：${cmd}`, args); return null;
     case "classify_bills_ai": return { asked: 0, done: 0, error: null };
@@ -881,7 +882,7 @@ function renderSide() {
   // 账单只在电脑上导入、存在电脑上，手机版没有收支页
   const money = document.querySelector('#nav [data-page="money"]');
   if (money) money.hidden = !!st.mobile;
-  // 游戏是可选功能（设置 → 功能，默认关），开了才出现；手机版不放
+  // 游戏是可选功能（设置 → 功能，默认开），关了就不出现；手机版不放
   const games = document.querySelector('#nav [data-page="games"]');
   if (games) games.hidden = !!st.mobile || !(S.settings && S.settings.games);
   if (dot) { dot.hidden = !bad; dot.title = st.paused ? tr("已暂停") : tr("没在记录或缺权限"); }
@@ -2357,11 +2358,12 @@ async function renderMoney(arg) {
   };
 }
 
-// ---------- 游戏：英雄联盟（Windows 上 crates/beayy-games 记的，src-tauri/src/games.rs 汇总；方案 报告/方案_20261106_英雄联盟接入.md） ----------
+// ---------- 游戏：英雄联盟、Steam（Windows 上 crates/beayy-games 记的，src-tauri/src/games.rs 汇总；方案 报告/方案_20261106_英雄联盟接入.md） ----------
 
-const GM = { game: "lol", tab: "overview", range: "30", data: null };
-/** 支持的游戏（id → 名字）；以后加 Steam 等在这里和 games.rs 各加一项 */
-const GM_GAMES = { lol: "英雄联盟" };
+/** game 空着＝让后台选最近玩过的那款 */
+const GM = { game: null, tab: "overview", range: "30", data: null };
+/** 支持的游戏（id → 名字）；再加一款在这里和 games.rs 各加一项 */
+const GM_GAMES = { lol: "英雄联盟", steam: "Steam" };
 const GM_TIER = { IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金", PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石", MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者" };
 const GM_QUEUE = { RANKED_SOLO_5x5: "单双排", RANKED_FLEX_SR: "灵活排位", RANKED_TFT: "云顶之弈", RANKED_TFT_DOUBLE_UP: "云顶双人" };
 const GM_REGION = { HN1: "艾欧尼亚", HN10: "黑色玫瑰", BGP2: "峡谷之巅" };
@@ -2400,8 +2402,8 @@ function gmNightSec(g) {
   return (ov(0, 300) + ov(1380, 1740)) * 60;
 }
 
-/** 每天打了多久：一天一根柱，深夜那段用越界色 */
-function gmDayChart(days, cut) {
+/** 每天打了多久：一天一根柱，深夜那段用越界色。o.tip(d)＝那天提示里的局数、胜负几行，o.label＝图例 */
+function gmDayChart(days, cut, o = {}) {
   const by = Object.fromEntries(days.map((x) => [x.date, x]));
   const today = localDay(), first = cut || (days.length ? days[days.length - 1].date : today);
   const dates = [];
@@ -2410,21 +2412,22 @@ function gmDayChart(days, cut) {
   const every = dates.length > 14 ? 5 : 1;
   const cols = dates.map((x, i) => {
     const d = by[x], play = d ? d.play : 0, night = d ? Math.min(play, d.games.reduce((s, g) => s + gmNightSec(g), 0)) : 0;
-    const tip = d ? [gmDay(x), tr("{n} 局", { n: d.n + d.remakes }), d.n ? tr("{w} 胜 {l} 负", { w: d.w, l: d.n - d.w }) : "", tr("打了 {t}", { t: durText(play) }), night ? tr("深夜 {t}", { t: durText(night) }) : ""].filter(Boolean).join("\n") : gmDay(x);
+    const head = o.tip ? o.tip(d) : d ? [tr("{n} 局", { n: d.n + d.remakes }), d.n ? tr("{w} 胜 {l} 负", { w: d.w, l: d.n - d.w }) : "", tr("打了 {t}", { t: durText(play) })] : [];
+    const tip = d ? [gmDay(x), ...head, night ? tr("深夜 {t}", { t: durText(night) }) : ""].filter(Boolean).join("\n") : gmDay(x);
     // 柱子从下往上画：先是 23:00 以前的，深夜那段在上面
     const segs = (play - night > 0 ? `<i style="height:${((play - night) / max * 100).toFixed(2)}%;background:var(--rec-computer)"></i>` : "") + (night ? `<i style="height:${(night / max * 100).toFixed(2)}%;background:var(--rec-night)"></i>` : "");
     const tick = i % every === 0 || x === today;
     return `<button class="mn-col${tick ? " is-tick" : ""}" data-gday="${x}"${d ? "" : " disabled"} title="${esc(tip)}"><span class="mn-stack">${segs}</span><span class="mn-l">${tick ? +x.slice(8) : ""}</span></button>`;
   }).join("");
-  return `<div class="mn-cols mn-days">${cols}</div><div class="legend mn-legend"><span><i style="background:var(--rec-computer)"></i>${tr("对局")}</span><span><i style="background:var(--rec-night)"></i>${tr("23:00 以后")}</span></div>`;
+  return `<div class="mn-cols mn-days">${cols}</div><div class="legend mn-legend"><span><i style="background:var(--rec-computer)"></i>${o.label || tr("对局")}</span><span><i style="background:var(--rec-night)"></i>${tr("23:00 以后")}</span></div>`;
 }
 
-/** 什么时候玩：一天一行、横轴 24 小时，每局按开局和时长画一段 */
-function gmTimeline(days) {
+/** 什么时候玩：一天一行、横轴 24 小时，每局按开局和时长画一段；what(g)＝提示里最后那段（胜负、游戏名） */
+function gmTimeline(days, what = gmResult) {
   const rows = days.filter((x) => x.games.length).slice(0, 14).map((x) => {
     const blocks = x.games.map((g) => {
       const t = new Date(g.start), s = (t.getHours() * 60 + t.getMinutes()) / 1440, w = Math.min(1 - s, g.dur / 86400);
-      return `<i class="${gmNightSec(g) > g.dur / 2 ? "is-night" : ""}" style="left:${(s * 100).toFixed(2)}%;width:${(w * 100).toFixed(2)}%" title="${esc(`${hm(g.start)} · ${durText(g.dur)} · ${gmResult(g)}`)}"></i>`;
+      return `<i class="${gmNightSec(g) > g.dur / 2 ? "is-night" : ""}" style="left:${(s * 100).toFixed(2)}%;width:${(w * 100).toFixed(2)}%" title="${esc(`${hm(g.start)} · ${durText(g.dur)} · ${what(g)}`)}"></i>`;
     }).join("");
     return `<div class="gm-tl-row"><span class="gm-tl-d">${esc(gmDay(x.date))}</span><span class="gm-tl-track">${blocks}</span></div>`;
   }).join("");
@@ -2482,8 +2485,54 @@ function gmChampsBody(v) {
   return cs.length ? gmChampTable(cs) : emptyInline(tr("这段时间没打"));
 }
 
+// Steam：每次从开到关（steam.session）、游戏库里每款的总时长（steam.library）
+
+const gmApp = (x) => x.name || `#${x.appid}`;
+
+function gmSteamView() {
+  const d = GM.data;
+  const cut = GM.range === "all" ? "" : localDay(new Date(Date.now() - (+GM.range - 1) * 86400000));
+  return { cut, sessions: d.sessions.filter((x) => !cut || gmDayOf(x.start) >= cut), days: d.days.filter((x) => !cut || x.date >= cut) };
+}
+
+/** 每款：这段时间玩了几次、多久、最近一次；累计是 Steam 自己记的总时长。选「全部」时没在 Beayy 里记过的也列上（只列有名字的：没装的游戏本机读不到名字） */
+function gmSteamApps(ss) {
+  const lib = new Map((GM.data.library || []).map((a) => [a.appid, a]));
+  const by = new Map();
+  for (const x of ss) {
+    const a = by.get(x.appid) || { appid: x.appid, name: x.name, n: 0, play: 0, last: x.start };
+    a.n++; a.play += x.dur;
+    if (x.start > a.last) a.last = x.start;
+    by.set(x.appid, a);
+  }
+  if (GM.range === "all") for (const l of lib.values()) if (!by.has(l.appid) && l.name) by.set(l.appid, { appid: l.appid, name: l.name, n: 0, play: 0, last: l.last });
+  return [...by.values()].map((a) => ({ ...a, total: lib.has(a.appid) ? lib.get(a.appid).total_min * 60 : null })).sort((a, b) => b.play - a.play || (b.total || 0) - (a.total || 0));
+}
+
+function gmSteamTable(apps) {
+  return `<div class="mx-table-wrap"><table class="mx-table gm-t gm-apps"><thead><tr><th>${tr("游戏")}</th><th class="is-num g-n">${tr("启动")}</th><th class="is-num g-dur">${tr("时长")}</th><th class="is-num g-n">${tr("最近")}</th><th class="is-num g-dur">${tr("累计")}</th></tr></thead><tbody>
+    ${apps.map((a) => `<tr><td>${esc(gmApp(a))}</td><td class="is-num">${a.n || "—"}</td><td class="is-num">${a.play ? durText(a.play) : "—"}</td><td class="is-num">${a.last ? gmDayOf(a.last).slice(5) : "—"}</td><td class="is-num">${a.total != null ? durText(a.total) : "—"}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function gmSteamOverview(v) {
+  const play = v.sessions.reduce((s, x) => s + x.dur, 0), night = v.sessions.reduce((s, x) => s + x.night_s, 0);
+  const apps = gmSteamApps(v.sessions);
+  const ro = `<div class="readouts gm-ro4">
+      ${readout(tr("玩了"), hh(play), tr("小时"), "", false, durText(play))}
+      ${readout(tr("启动"), v.sessions.length, tr("次"))}
+      ${readout(tr("游戏"), apps.filter((a) => a.n).length, tr("款"))}
+      ${readout(tr("深夜"), night ? hh(night) : "—", tr("小时"), "", night > 0, tr("23:00 到 5:00"))}
+    </div>`;
+  const tip = (d) => (d ? [tr("{n} 次", { n: d.n }), tr("玩了 {t}", { t: durText(d.play) })] : []);
+  return ro + `<div class="secs-plain" style="margin-top:var(--space-6)">
+    ${section(tr("每天"), gmDayChart(v.days, v.cut, { tip, label: tr("游戏") }))}
+    ${v.days.some((x) => x.games.length) ? section(tr("什么时候玩"), gmTimeline(v.days, gmApp)) : ""}
+    ${apps.length ? section(tr("每款游戏"), gmSteamTable(apps)) : ""}</div>`;
+}
+
 function drawGames() {
   const body = document.getElementById("gm-body"); if (!body || !GM.data) return;
+  if (GM.data.game === "steam") { body.innerHTML = gmSteamOverview(gmSteamView()); return; }
   const v = gmView();
   body.innerHTML = GM.tab === "list" ? gmList(v) : GM.tab === "champs" ? gmChampsBody(v) : gmOverview(v);
 }
@@ -2496,22 +2545,25 @@ async function renderGames(arg) {
     return;
   }
   if (arg && GM_GAMES[arg]) GM.game = arg;
-  const d = await call("games_overview", { game: GM.game });
+  const d = await call("games_overview", GM.game ? { game: GM.game } : {});
   if (stale(tk)) return;
   GM.data = d;
+  GM.game = d.game;
+  const steam = d.game === "steam";
   const list = (d.games || []).map((g) => g.id);
   const pick = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="gm-game" aria-haspopup="menu" aria-expanded="false">${esc(tr(GM_GAMES[GM.game]))}${ICON.chevD}</button>
       <div class="mx-menu" role="menu" hidden>${Object.keys(GM_GAMES).filter((k) => list.includes(k) || k === GM.game).map((k) => `<button role="menuitemradio" aria-checked="${k === GM.game}" data-ggame="${k}">${esc(tr(GM_GAMES[k]))}${k === GM.game ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
-  if (!d.matches.length) {
-    $app.innerHTML = header(tr("游戏"), pick) + `<div class="reading">${emptyBlock("day", tr("在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里"))}</div>`;
+  if (!(steam ? d.sessions : d.matches).length) {
+    $app.innerHTML = header(tr("游戏"), pick) + `<div class="reading">${emptyBlock("day", steam ? tr("在 Windows 电脑的 Beayy 里也打开「游戏」，玩 Steam 游戏的时长会记在这里") : tr("在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里"))}</div>`;
     bindPick(document.getElementById("gm-game"));
     return;
   }
   const a = d.account;
-  const who = a ? [`${a.name}${a.tag ? "#" + a.tag : ""}`, a.platform ? tr(GM_REGION[a.platform] || a.platform) : ""].filter(Boolean).join(" · ") : "";
-  const tabs = `<div class="tabs" role="tablist">${[["overview", tr("概览")], ["list", tr("对局")], ["champs", tr("英雄")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.tab}" class="${k === GM.tab ? "is-on" : ""}" data-gtab="${k}">${v}</button>`).join("")}</div>`;
+  const who = !a ? "" : steam ? a.name || "" : [`${a.name}${a.tag ? "#" + a.tag : ""}`, a.platform ? tr(GM_REGION[a.platform] || a.platform) : ""].filter(Boolean).join(" · ");
+  // Steam 只有概览，不出页签
+  const tabs = steam ? "" : `<div class="tabs" role="tablist">${[["overview", tr("概览")], ["list", tr("对局")], ["champs", tr("英雄")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.tab}" class="${k === GM.tab ? "is-on" : ""}" data-gtab="${k}">${v}</button>`).join("")}</div>`;
   const seg = `<div class="mx-seg" role="tablist">${[["7", tr("近 7 天")], ["30", tr("近 30 天")], ["all", tr("全部")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.range}" class="${k === GM.range ? "is-on" : ""}" data-grange="${k}">${v}</button>`).join("")}</div>`;
-  $app.innerHTML = header(tr("游戏"), (who ? `<span class="gm-who" title="${esc(a.level ? tr("{n} 级", { n: a.level }) : "")}">${esc(who)}</span>` : "") + pick) + `<div id="games"><div class="toolbar"><div class="toolbar-left">${tabs}<span class="tb-sep"></span>${seg}</div></div><div class="reading" id="gm-body"></div></div>`;
+  $app.innerHTML = header(tr("游戏"), (who ? `<span class="gm-who" title="${esc(a.level ? tr("{n} 级", { n: a.level }) : "")}">${esc(who)}</span>` : "") + pick) + `<div id="games"><div class="toolbar"><div class="toolbar-left">${tabs}${tabs ? '<span class="tb-sep"></span>' : ""}${seg}</div></div><div class="reading" id="gm-body"></div></div>`;
   drawGames();
   bindPick(document.getElementById("gm-game"));
   document.getElementById("gm-game").parentElement.onclick = (e) => { const x = e.target.closest("[data-ggame]"); if (x) location.hash = `#/games/${x.dataset.ggame}`; };
@@ -2523,6 +2575,7 @@ async function renderGames(arg) {
     if ((x = at("[data-game]"))) return gmGameDialog(+x.dataset.game);
     if (at("[data-gchamp]")) { if (GM.tab !== "champs") { GM.tab = "champs"; renderGames(); } return; }
     if ((x = at("[data-gday]"))) {
+      if (steam) return;
       GM.tab = "list"; const day = x.dataset.gday;
       return renderGames().then(() => { const el = document.getElementById(`gm-d-${day}`); if (el) el.scrollIntoView({ block: "start" }); });
     }
@@ -3634,7 +3687,7 @@ async function renderSettings() {
     body = (mobile ? phoneSection() : "") + (mobile ? section(tr("服务"), servicesRows(cf, st)) : group(servicesRows(cf, st)));
   } else if (tab === "features") {
     // 可选的功能，默认都关；每台电脑各自开
-    body = group(setRow(tr("游戏"), tr("Windows 上读英雄联盟客户端，记每一局的战绩；侧栏出现「游戏」"), `<button class="mx-switch" role="switch" id="games-on" aria-checked="${!!cf.games}" aria-label="${tr("游戏")}"></button>`));
+    body = group(setRow(tr("游戏"), tr("Windows 上记英雄联盟的每一局、Steam 每款游戏玩了多久；侧栏出现「游戏」"), `<button class="mx-switch" role="switch" id="games-on" aria-checked="${!!cf.games}" aria-label="${tr("游戏")}"></button>`));
   } else {
     body = syncPanel(sy) + devicesPanel(devs || [], st) + (SS.storage ? storageView(SS.storage) : "");
   }

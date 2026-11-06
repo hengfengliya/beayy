@@ -56,7 +56,8 @@ pub fn start(log: Arc<EventLog>) {
     });
 }
 
-/// 账号上的头像和名称比本机新（在别的设备上改过），就拉下来
+/// 头像和名称：账号上的比本机新（在别的设备上改过）就拉下来；本机的更新（登录账号以前设的、
+/// 当时只存在本机）就推上去，别的设备下一轮就拿到
 fn pull_profile() {
     let root = data_root();
     if beayy_sync::service(&root).and_then(|a| a.email).is_none() {
@@ -66,8 +67,21 @@ fn pull_profile() {
     if let Ok(v) = v {
         let p = &v["profile"];
         let updated = p["updated"].as_i64().unwrap_or(0);
-        if updated > crate::data::profile_updated() {
+        let mine = crate::data::profile_updated();
+        if updated > mine {
             let _ = crate::data::write_profile(p["name"].as_str().unwrap_or(""), p["avatar"].as_str(), updated);
+        } else if mine > updated {
+            let s = crate::data::read_settings_raw();
+            let name = s.get("profile_name").and_then(Value::as_str).unwrap_or("").to_string();
+            let avatar = s.get("profile_avatar").and_then(Value::as_str).map(String::from);
+            if name.is_empty() && avatar.is_none() {
+                return;
+            }
+            if let Ok(at) = beayy_sync::set_profile(&root, &name, avatar.as_deref()) {
+                if at > 0 {
+                    let _ = crate::data::write_profile(&name, avatar.as_deref(), at);
+                }
+            }
         }
     }
 }

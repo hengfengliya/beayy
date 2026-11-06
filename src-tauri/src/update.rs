@@ -365,9 +365,10 @@ fn install(zip: &Path) -> Result<(), String> {
         return Err(format!("换不了正在用的程序：{e}"));
     }
     let _ = fs::remove_dir_all(&tmp);
-    // 等这个进程退出再打开新的，带 --open 直接开主窗口
+    // 等这个进程退出再打开新的，带 --open 直接开主窗口。整条命令用 raw_arg 原样交给 cmd：
+    // 走 args 的话 Rust 会把里面的引号转义成 \"，cmd 不认，start 拿到的路径成了 \，弹「\\ 找不到网络路径」，新版也没打开
     Command::new("cmd")
-        .args(["/C", &format!("ping -n 3 127.0.0.1 >nul & start \"\" \"{}\" --open", exe.display())])
+        .raw_arg(format!("/C ping -n 3 127.0.0.1 >nul & start \"\" \"{}\" --open", exe.display()))
         .creation_flags(NO_WINDOW)
         .spawn()
         .map_err(|e| e.to_string())?;

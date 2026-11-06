@@ -355,6 +355,7 @@ button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-m
 /* 游戏页：账号写在页头右边；读数五个一排；每天的柱沿用收支的 mn-days；什么时候玩（一天一行、24 小时横轴，时刻等宽）；对局表；一局的弹层 */
 .gm-who { margin-right: var(--space-3); font-size: 13px; color: var(--ink-3); }
 #gm-body .readouts { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+#gm-body .readouts.gm-ro4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .gm-tl { display: grid; gap: 6px; }
 .gm-tl-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: var(--space-3); }
 .gm-tl-d { font-size: 12px; line-height: 16px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -370,6 +371,8 @@ button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-m
 .mx-table.gm-champs .g-n { width: 40px; }
 .mx-table.gm-champs .g-kda { width: 104px; }
 .mx-table.gm-champs .g-dmg, .mx-table.gm-champs .g-dur { width: 64px; }
+.mx-table.gm-apps .g-n { width: 56px; }
+.mx-table.gm-apps .g-dur { width: 80px; }
 .mx-table.gm-games .g-time { width: 40px; }
 .mx-table.gm-games .g-res { width: 32px; }
 .mx-table.gm-games th.is-num { width: 64px; }

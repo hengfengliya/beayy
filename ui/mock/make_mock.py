@@ -743,7 +743,7 @@ mock = {
                      "sync_server": "https://sync.beayy.com", "default_sync_server": "https://sync.beayy.com", "sync_mode": "server", "sync_folder": "",
                      "icloud_folder": "/Users/demo/Library/Mobile Documents/com~apple~CloudDocs/Beayy",
                      "transcribe_server": "https://audio.beayy.com", "default_transcribe_server": "https://audio.beayy.com", "speaker_name": "我",
-                     "model_mode": "custom", "map_mode": "custom", "has_amap_key": False, "has_amap_js": False},
+                     "model_mode": "custom", "map_mode": "custom", "has_amap_key": False, "has_amap_js": False, "games": True},
     "llm_status": {"plan": None, "month": TODAY.isoformat()[:7], "llm": {"used": sum(u["in"] + u["out"] for u in usage if u["date"][:7] == TODAY.isoformat()[:7]), "quota": 20000000},
                    "asr": {"used": 0, "quota": 1800000}, "map": {"used": 86, "quota": 30000}},
     "get_rules": [{"id": "r1", "text": "23:00 以后不用手机", "enabled": True}, {"id": "r2", "text": "手机每天不超过 4 小时", "enabled": True},
@@ -883,6 +883,7 @@ def make_bills():
 
 def make_games():
     """游戏页：一个虚构的玩家（「雾港旧人#00001」，艾欧尼亚），近三周晚上打英雄联盟，排位和大乱斗；同局的人名全是编的。
+    同一个人还在 Steam 上玩几款编出来的游戏（steam.session、steam.library）。
     写成 Windows 电脑 game.* 事件放进临时数据目录，再用真程序的 --dump 算出页面要的样子"""
     import os, subprocess, tempfile
     exe = next((p for p in [HERE.parents[1] / "target/debug/beayy", HERE.parents[1] / "target/release/beayy"] if p.exists()), None)
@@ -980,11 +981,31 @@ def make_games():
                 put(t + timedelta(seconds=dur + 90), {"event_type": "game.rank", **rank()})
             t += timedelta(seconds=dur + r.randint(300, 900))
         d += timedelta(days=1)
+    # Steam：同一个人在同一台电脑上玩几款编出来的游戏（appid、名字、时长都是编的），晚上和周末下午，偶尔玩过 23 点
+    apps = {1910001: ("灯塔守夜人", 5400), 1910002: ("星图拼接", 1250), 1910003: ("慢船", 860), 1910004: ("纸上城市", 3100), 1910005: ("回声矿井", 420)}
+    rs = random.Random(29)
+    d = first_day
+    while d < TODAY:
+        k = rs.choice([0, 0, 1, 1, 2]) if d.weekday() < 5 else rs.choice([1, 2, 2, 3])
+        t = at(d, rs.choice([14, 15, 20, 21]) if d.weekday() >= 5 else rs.choice([19, 20, 20, 21, 22]), rs.randint(0, 50))
+        for _ in range(k):
+            appid = rs.choice([1910001, 1910001, 1910002, 1910004, 1910004, 1910003])
+            dur = rs.randint(900, 7200)
+            name = apps[appid][0]
+            put(t, {"event_type": "steam.session", "state": "start", "appid": appid, "name": name, "started_at": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")})
+            e = t + timedelta(seconds=dur)
+            put(e, {"event_type": "steam.session", "state": "end", "appid": appid, "name": name, "started_at": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                    "ended_at": e.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "duration_s": dur})
+            t = e + timedelta(seconds=rs.randint(120, 1800))
+        d += timedelta(days=1)
+    put(at(TODAY - timedelta(days=1), 12), {"event_type": "steam.library", "account_id": 10001, "persona": "雾港旧人",
+                                             "apps": [{"appid": a, "name": n, "playtime_min": m, "last_played": None} for a, (n, m) in apps.items()]})
     env = {**os.environ, "HOME": str(home)}
     env.pop("BEAYY_SHADOW", None)
     run = lambda *a: json.loads(subprocess.check_output([str(exe), "--dump", *a], env=env))
-    ov = run("games_overview")
-    mock["games_overview"] = ov
+    ov = run("games_overview", "lol")
+    # 按游戏分开存；default＝不指定时后台选的那款（最近玩过的）
+    mock["games_overview"] = {"lol": ov, "steam": run("games_overview", "steam"), "default": run("games_overview")["game"]}
     mock["get_game"] = {str(m["id"]): run("get_game", str(m["id"])) for m in ov["matches"][:40]}
 
 

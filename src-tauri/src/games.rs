@@ -1,17 +1,18 @@
-//! 游戏：按游戏分开汇总，现在只有英雄联盟（lol）；以后加 Steam 等就在 GAMES 加一项、写它自己的汇总。
+//! 游戏：按游戏分开汇总，英雄联盟（lol）和 Steam（steam）；再加一款就在 GAMES 加一项、写它自己的汇总。
 //! 英雄联盟：各台 Windows 电脑上 crates/beayy-games 记的 game.* 事件随分段同步过来，这里汇成对局、每天、英雄、段位。
-//! 设置 → 功能 → 游戏（settings.json 的 games）默认关：关着采集端不读客户端、侧栏不出游戏页，已记的照样能读。
+//! 设置 → 功能 → 游戏（settings.json 的 games）默认开，关掉后：关着采集端不读客户端、侧栏不出游戏页，已记的照样能读。
 //! 方案见 报告/方案_20261106_英雄联盟接入.md。都是读的时候现算、不另存；只看 win- 开头的设备（Mac 版客户端以后再接）。
 //! - 一局：game.match（对局开始时刻、自己那一行的统计、raw＝客户端原样返回的 10 个人）。
 //! - 排队、选人、读条多久：game.phase 的阶段变化，同一台电脑上从离开大厅到回到大厅算一轮，轮里带着 gameId 的就是那一局；
 //!   没进成游戏的一轮（取消排队、有人秒退）只算进那天的等待。补写的历史局没有阶段。
 //! - 段位：game.rank 每次变了才写；排位局前后两份一比就是这局加减的胜点。
+//! Steam：steam.session（start 开始、end 结束带时长），steam.library（每款总时长，变了才写）。见 steam_overview。
 
-use chrono::{DateTime, Duration, Local, Timelike, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-const TYPES: [&str; 4] = ["game.match", "game.rank", "game.client", "game.phase"];
+const TYPES: [&str; 6] = ["game.match", "game.rank", "game.client", "game.phase", "steam.session", "steam.library"];
 /// 不到 5 分钟就结束的算重开（有人没进来），不计胜负
 const REMAKE_S: i64 = 300;
 /// 两次阶段变化隔得太久（电脑睡了、客户端挂着没人管），这段不算
@@ -229,15 +230,32 @@ struct Day {
 }
 
 /// 支持的游戏
-const GAMES: [&str; 1] = ["lol"];
+const GAMES: [&str; 2] = ["lol", "steam"];
 
-/// 游戏页：有哪些游戏（games），和选的那款（现在只有 lol）的账号、段位、每一局（新的在前）、每天
+/// 有哪些游戏、各记了多少（局、次）和最近一次；没记过的不列
+fn games_list(ms: &[&Value], ss: &[Session]) -> Vec<Value> {
+    let mut v = vec![];
+    if !ms.is_empty() {
+        v.push(json!({ "id": "lol", "n": ms.len(), "last": ms.last().and_then(|e| start_of(e)).map(beayy_core::iso) }));
+    }
+    if !ss.is_empty() {
+        v.push(json!({ "id": "steam", "n": ss.len(), "last": ss.iter().map(|s| s.start).max().map(beayy_core::iso) }));
+    }
+    v
+}
+
+/// 游戏页：有哪些游戏（games），和选的那款的数据。没指定就选最近玩过的那款
 #[cfg_attr(not(beayy_mobile), tauri::command(async))]
 pub fn games_overview(game: Option<String>) -> Value {
-    let game = game.filter(|g| GAMES.contains(&g.as_str())).unwrap_or_else(|| "lol".into());
     let ev = events();
     let ms = matches_of(&ev);
-    let games = json!([{ "id": "lol", "n": ms.len(), "last": ms.last().and_then(|e| start_of(e)).map(beayy_core::iso) }]);
+    let ss = sessions_of(&ev, Utc::now());
+    let games = games_list(&ms, &ss);
+    let latest = games.iter().max_by_key(|g| g["last"].as_str().unwrap_or("").to_string()).and_then(|g| g["id"].as_str()).unwrap_or("lol").to_string();
+    let game = game.filter(|g| GAMES.contains(&g.as_str())).unwrap_or(latest);
+    if game == "steam" {
+        return steam_overview(&ev, ss, games);
+    }
     let puuids = my_puuids(&ev);
     let runs = runs_of(&ev);
     let by_game: HashMap<i64, &Run> = runs.iter().filter(|r| r.game > 0).map(|r| (r.game, r)).collect();
@@ -279,7 +297,7 @@ pub fn games_overview(game: Option<String>) -> Value {
         json!({ "at": beayy_core::iso(*t), "queues": qs })
     });
     json!({
-        "game": game,
+        "game": "lol",
         "games": games,
         "account": account,
         "rank": rank,
@@ -332,4 +350,151 @@ pub fn get_game(id: i64) -> Value {
         .collect();
     out.sort_by_key(|t| !t["mine"].as_bool().unwrap_or(false));
     json!({ "match": light(e, &puuids, run, &ranks), "teams": out })
+}
+
+// ---------- Steam ----------
+
+/// 只有开始没有结束的那次（还在玩）：最多算这么久，再久多半是 Beayy 被关了、没来得及写结束
+const LIVE_MAX_S: i64 = 12 * 3600;
+
+/// 玩一次：开始、多久、哪款
+struct Session {
+    appid: i64,
+    name: Option<String>,
+    start: DateTime<Utc>,
+    dur: i64,
+    device: String,
+    live: bool,
+}
+
+/// 每次：结束那条带开始和时长；某台电脑最后一条是开始、还没结束的，算到现在（标 live）
+fn sessions_of(ev: &[Value], now: DateTime<Utc>) -> Vec<Session> {
+    let key = |e: &Value| (e["device"].as_str().unwrap_or("").to_string(), e["started_at"].as_str().unwrap_or("").to_string(), int(&e["appid"]));
+    let mut by: BTreeMap<(String, String, i64), Session> = BTreeMap::new();
+    let mut last: HashMap<&str, &Value> = HashMap::new();
+    for e in ev.iter().filter(|e| e["event_type"] == "steam.session") {
+        last.insert(e["device"].as_str().unwrap_or(""), e);
+        if e["state"] != "end" {
+            continue;
+        }
+        let Some(start) = ts(&e["started_at"]) else { continue };
+        by.insert(key(e), Session { appid: int(&e["appid"]), name: e["name"].as_str().map(String::from), start, dur: int(&e["duration_s"]).max(0), device: e["device"].as_str().unwrap_or("").into(), live: false });
+    }
+    for e in last.into_values().filter(|e| e["state"] == "start") {
+        let Some(start) = ts(&e["started_at"]) else { continue };
+        let dur = (now - start).num_seconds();
+        if !by.contains_key(&key(e)) && (0..LIVE_MAX_S).contains(&dur) {
+            by.insert(key(e), Session { appid: int(&e["appid"]), name: e["name"].as_str().map(String::from), start, dur, device: e["device"].as_str().unwrap_or("").into(), live: true });
+        }
+    }
+    let mut v: Vec<Session> = by.into_values().collect();
+    v.sort_by_key(|s| s.start);
+    v
+}
+
+fn local_at(d: NaiveDate, h: u32) -> Option<DateTime<Utc>> {
+    Local.from_local_datetime(&d.and_hms_opt(h, 0, 0)?).earliest().map(|t| t.with_timezone(&Utc))
+}
+
+/// [s, e) 里落在本地 23:00–5:00 的秒数
+fn night_secs(s: DateTime<Utc>, e: DateTime<Utc>) -> i64 {
+    let mut total = 0;
+    let (mut d, end) = (s.with_timezone(&Local).date_naive() - Duration::days(1), e.with_timezone(&Local).date_naive());
+    while d <= end {
+        if let (Some(a), Some(b)) = (local_at(d, 23), d.succ_opt().and_then(|n| local_at(n, 5))) {
+            total += (e.min(b) - s.max(a)).num_seconds().max(0);
+        }
+        let Some(n) = d.succ_opt() else { break };
+        d = n;
+    }
+    total
+}
+
+/// Steam：每次（新的在前）、每天、每款的总时长（游戏库里 Steam 自己记的，各台电脑各账号取最新那份、同一款取大的）
+fn steam_overview(ev: &[Value], ss: Vec<Session>, games: Vec<Value>) -> Value {
+    let mut latest: BTreeMap<(String, i64), &Value> = BTreeMap::new();
+    for e in ev.iter().filter(|e| e["event_type"] == "steam.library") {
+        latest.insert((e["device"].as_str().unwrap_or("").to_string(), int(&e["account_id"])), e);
+    }
+    let mut names: HashMap<i64, String> = HashMap::new();
+    let mut lib: BTreeMap<i64, (i64, String)> = BTreeMap::new();
+    for e in latest.values() {
+        for a in e["apps"].as_array().into_iter().flatten() {
+            let id = int(&a["appid"]);
+            if let Some(n) = a["name"].as_str() {
+                names.insert(id, n.to_string());
+            }
+            let x = lib.entry(id).or_default();
+            x.0 = x.0.max(int(&a["playtime_min"]));
+            x.1 = x.1.clone().max(a["last_played"].as_str().unwrap_or("").to_string());
+        }
+    }
+    for s in &ss {
+        if let Some(n) = &s.name {
+            names.insert(s.appid, n.clone());
+        }
+    }
+    let name = |id: i64| names.get(&id).cloned().map(Value::from).unwrap_or(Value::Null);
+    let mut days: BTreeMap<String, (i64, i64, Vec<Value>)> = BTreeMap::new();
+    let mut list = vec![];
+    for s in &ss {
+        let night = night_secs(s.start, s.start + Duration::seconds(s.dur));
+        let start = beayy_core::iso(s.start);
+        let d = days.entry(s.start.with_timezone(&Local).format("%Y-%m-%d").to_string()).or_default();
+        d.0 += s.dur;
+        d.1 += night;
+        d.2.push(json!({ "appid": s.appid, "name": name(s.appid), "start": start, "dur": s.dur }));
+        list.push(json!({ "appid": s.appid, "name": name(s.appid), "start": start, "dur": s.dur, "device": s.device, "live": s.live, "night_s": night }));
+    }
+    list.reverse();
+    let mut library: Vec<Value> = lib.into_iter().map(|(id, (min, last))| json!({ "appid": id, "name": name(id), "total_min": min, "last": (!last.is_empty()).then_some(last) })).collect();
+    library.sort_by_key(|a| -int(&a["total_min"]));
+    let account = latest.values().max_by_key(|e| e["timestamp"].as_str().unwrap_or("").to_string()).and_then(|e| e["persona"].as_str()).map(|p| json!({ "name": p }));
+    json!({
+        "game": "steam",
+        "games": games,
+        "account": account,
+        "sessions": list,
+        "days": days.into_iter().rev().map(|(date, (play, night, g))| json!({ "date": date, "n": g.len(), "play": play, "night_s": night, "games": g })).collect::<Vec<_>>(),
+        "library": library,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steam_sessions() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 6, 12, 0, 0).unwrap();
+        let es = vec![
+            json!({"event_type": "steam.session", "device": "win-a", "timestamp": "2026-11-06T08:00:00.000Z", "state": "start", "appid": 10, "name": "雾港", "started_at": "2026-11-06T08:00:00.000Z"}),
+            json!({"event_type": "steam.session", "device": "win-a", "timestamp": "2026-11-06T09:00:00.000Z", "state": "end", "appid": 10, "name": "雾港", "started_at": "2026-11-06T08:00:00.000Z", "duration_s": 3600}),
+            // 同一次又同步来一份：只算一次
+            json!({"event_type": "steam.session", "device": "win-a", "timestamp": "2026-11-06T09:00:00.000Z", "state": "end", "appid": 10, "name": "雾港", "started_at": "2026-11-06T08:00:00.000Z", "duration_s": 3600}),
+            // 还在玩
+            json!({"event_type": "steam.session", "device": "win-a", "timestamp": "2026-11-06T11:30:00.000Z", "state": "start", "appid": 20, "started_at": "2026-11-06T11:30:00.000Z"}),
+            // 另一台很久以前开始、没写结束：不算
+            json!({"event_type": "steam.session", "device": "win-b", "timestamp": "2026-11-01T11:30:00.000Z", "state": "start", "appid": 30, "started_at": "2026-11-01T11:30:00.000Z"}),
+            json!({"event_type": "steam.library", "device": "win-a", "timestamp": "2026-11-06T09:01:00.000Z", "account_id": 42, "persona": "旧人", "apps": [{"appid": 10, "name": "雾港", "playtime_min": 600}, {"appid": 20, "name": "Lantern", "playtime_min": 30}]}),
+        ];
+        let ss = sessions_of(&es, now);
+        assert_eq!(ss.iter().map(|s| (s.appid, s.dur, s.live)).collect::<Vec<_>>(), vec![(10, 3600, false), (20, 1800, true)]);
+        let v = steam_overview(&es, ss, vec![]);
+        assert_eq!(v["sessions"][0]["name"], "Lantern");
+        assert_eq!(v["library"][0]["total_min"], 600);
+        assert_eq!(v["account"]["name"], "旧人");
+        assert_eq!(v["days"].as_array().unwrap().iter().map(|d| int(&d["play"])).sum::<i64>(), 5400);
+    }
+
+    #[test]
+    fn night() {
+        let d = Local::now().date_naive();
+        let at = |h: u32, m: u32| Local.from_local_datetime(&d.and_hms_opt(h, m, 0).unwrap()).earliest().unwrap().with_timezone(&Utc);
+        // 22:00 到次日 1:00：深夜两小时
+        assert_eq!(night_secs(at(22, 0), at(22, 0) + Duration::hours(3)), 7200);
+        assert_eq!(night_secs(at(12, 0), at(13, 0)), 0);
+        // 凌晨 4:30 到 6:00：半小时
+        assert_eq!(night_secs(at(4, 30), at(6, 0)), 1800);
+    }
 }

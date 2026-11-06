@@ -1682,10 +1682,18 @@ window.I18N_EN = {
   "艾欧尼亚": "Ionia",
   "黑色玫瑰": "Black Rose",
   "峡谷之巅": "Summit of the Rift",
-  "Windows 上读英雄联盟客户端，记每一局的战绩；侧栏出现「游戏」": "Reads the League of Legends client on Windows and records every game; adds Games to the sidebar",
+  "Windows 上记英雄联盟的每一局、Steam 每款游戏玩了多久；侧栏出现「游戏」": "Records every League of Legends game and how long you play each Steam game on Windows; adds Games to the sidebar",
   "功能": "Features",
   "去设置里打开": "Turn on in Settings",
   "在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里": "Turn on Games in Beayy on your Windows PC too, and every League of Legends game you play shows up here",
   "游戏记录没开": "Games is off",
-  "英雄联盟": "League of Legends"
+  "英雄联盟": "League of Legends",
+  "玩了": "Played",
+  "玩了 {t}": "Played {t}",
+  "款": "",
+  "深夜": "Late night",
+  "23:00 到 5:00": "23:00 to 5:00",
+  "每款游戏": "By game",
+  "累计": "All time",
+  "在 Windows 电脑的 Beayy 里也打开「游戏」，玩 Steam 游戏的时长会记在这里": "Turn on Games in Beayy on your Windows PC too, and the time you spend in Steam games shows up here"
 };

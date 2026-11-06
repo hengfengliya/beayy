@@ -143,7 +143,8 @@ pub fn uninstall() {
             "ping -n 3 127.0.0.1 >nul & del /f /q \"{0}\\beayy.exe\" \"{0}\\beayy.old.exe\" & rmdir \"{0}\"",
             dir.display()
         );
-        let _ = Command::new("cmd").args(["/C", &cmd]).creation_flags(NO_WINDOW).spawn();
+        // raw_arg 原样交给 cmd：走 args 会把引号转义成 \"，cmd 不认，del、rmdir 就删不掉
+        let _ = Command::new("cmd").raw_arg(format!("/C {cmd}")).creation_flags(NO_WINDOW).spawn();
     }
 }
 

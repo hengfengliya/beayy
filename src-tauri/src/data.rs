@@ -1505,8 +1505,8 @@ pub fn get_settings() -> Value {
         // 自己选过间隔没有：没选过的跟着模型来源走（官方 60、自己的 10）
         "summary_minutes_set": s.get("summary_minutes").and_then(Value::as_i64).is_some(),
         "ui_lang": get("ui_lang", ""),
-        // 设置 → 功能：游戏（Windows 上读英雄联盟客户端、侧栏出游戏页），默认关
-        "games": s.get("games").and_then(Value::as_bool).unwrap_or(false),
+        // 设置 → 功能：游戏（Windows 上读英雄联盟客户端和 Steam、侧栏出游戏页），默认开（0.2.58 起；0.2.57 默认关）
+        "games": s.get("games").and_then(Value::as_bool).unwrap_or(true),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
             Some(Value::Bool(true)) => "medium",
