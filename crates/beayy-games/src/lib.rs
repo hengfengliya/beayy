@@ -1,4 +1,4 @@
-//! 游戏：英雄联盟（本文件）和 Steam（steam.rs），受「游戏」开关管，默认开。
+//! 游戏：英雄联盟（本文件）和 Steam（steam.rs）。「游戏」总开关默认关，打开后每款各有开关（默认开）。
 //!
 //! 英雄联盟：从客户端的本机接口（LCU）记每一局。
 //!
@@ -601,13 +601,19 @@ impl Watch {
     }
 }
 
-/// 设置 → 功能 → 游戏（settings.json 的 games），默认开：没存过这一项就算开
+fn settings() -> Value {
+    std::fs::read_to_string(beayy_core::default_root().join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
+}
+
+/// 设置 → 功能 → 游戏（settings.json 的 games）：总开关，默认关
 pub fn enabled() -> bool {
-    std::fs::read_to_string(beayy_core::default_root().join("settings.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v["games"].as_bool())
-        .unwrap_or(true)
+    settings()["games"].as_bool().unwrap_or(false)
+}
+
+/// 某款游戏记不记：总开关开着，且这款自己的开关（games_lol、games_steam，默认开）没关
+pub fn game_on(id: &str) -> bool {
+    let s = settings();
+    s["games"].as_bool().unwrap_or(false) && s[format!("games_{id}")].as_bool().unwrap_or(true)
 }
 
 /// 起后台线程：找客户端、记阶段和每一局；Steam 另起一根
@@ -618,7 +624,7 @@ pub fn start(log: Arc<EventLog>, paused: Arc<AtomicBool>) {
         let mut w = Watch::new(&data_root(), log, paused);
         loop {
             // 关着就不碰客户端；连着的时候关掉，记一条断开
-            if !enabled() {
+            if !game_on("lol") {
                 if w.connected() {
                     w.disconnect("关掉了游戏记录");
                 }

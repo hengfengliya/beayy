@@ -50,7 +50,7 @@ fn safe(id: &str) -> String {
     id.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')).collect()
 }
 
-fn data_url(png: &[u8]) -> String {
+pub(crate) fn data_url(png: &[u8]) -> String {
     format!("data:image/png;base64,{}", base64(png))
 }
 

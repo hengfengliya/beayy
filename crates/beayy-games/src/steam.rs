@@ -1,7 +1,7 @@
 //! Steam：每 30 秒看一眼在玩哪款，记每一次从开到关；游戏库里每款的总时长变了记一份。
 //!
 //! 只读：注册表 `HKCU\Software\Valve\Steam` 的 `RunningAppID`（在玩的，0＝没玩）、`SteamPath`、`ActiveProcess\ActiveUser`，
-//! `<Steam>\steamapps\appmanifest_*.acf`（装着的游戏名，各个库目录见 `libraryfolders.vdf`），
+//! `<Steam>\steamapps\appmanifest_*.acf`（装着的游戏名，各个库目录见 `libraryfolders.vdf`；没装的从 `appcache\appinfo.vdf` 读），
 //! `<Steam>\userdata\<账号>\config\localconfig.vdf`（每款的总时长、最近玩），`config\loginusers.vdf`（昵称）。不碰 Steam 和游戏进程。
 //!
 //! - 事件：`steam.session`（`state`＝`start` 开始一次；`end` 结束，带开始、结束、时长），`steam.library`（每款的总时长，变了才写）
@@ -11,7 +11,7 @@
 use beayy_core::{fields, iso, EventLog};
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -224,6 +224,133 @@ fn account(root: &Path, active: Option<u32>) -> Option<u32> {
     (ids.len() == 1).then(|| ids[0])
 }
 
+// ---------- appinfo.vdf（Steam 缓存的每款游戏信息，二进制） ----------
+
+/// `appcache/appinfo.vdf` 里这些 appid 的名字（`common > name`）。没装的游戏只有这里有名字。
+/// 认第 28、29 版（magic 0x07564428、0x07564429）：每条 appid、size、再 60 字节头，后面是二进制 KeyValues；
+/// 第 29 版的键名是文件末尾字符串表的下标。读不懂就返回空的
+pub fn appinfo_names(root: &Path, want: &BTreeSet<u32>) -> BTreeMap<u32, String> {
+    let mut out = BTreeMap::new();
+    if want.is_empty() {
+        return out;
+    }
+    let Ok(b) = std::fs::read(root.join("appcache/appinfo.vdf")) else { return out };
+    let u32_at = |p: usize| b.get(p..p + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+    let Some(magic) = u32_at(0) else { return out };
+    let (mut pos, strings) = match magic {
+        0x0756_4428 => (8, None),
+        0x0756_4429 => {
+            let Some(off) = b.get(8..16).map(|x| u64::from_le_bytes(x.try_into().unwrap_or_default()) as usize) else { return out };
+            (16, Some(string_table(&b, off)))
+        }
+        _ => return out,
+    };
+    while let (Some(id), Some(size)) = (u32_at(pos), u32_at(pos + 4)) {
+        if id == 0 {
+            break;
+        }
+        let (start, end) = (pos + 8, pos + 8 + size as usize);
+        if end > b.len() {
+            break;
+        }
+        if want.contains(&id) {
+            let mut kv = Kv { b: &b[start..end], i: 60, strings: strings.as_deref() };
+            let v = Value::Object(kv.object());
+            if let Some(n) = vdf_at(&v, &["appinfo", "common", "name"]).and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                out.insert(id, n.to_string());
+            }
+        }
+        pos = end;
+    }
+    out
+}
+
+fn string_table(b: &[u8], off: usize) -> Vec<String> {
+    let Some(n) = b.get(off..off + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]) as usize) else { return vec![] };
+    let mut out = Vec::with_capacity(n.min(1 << 16));
+    let mut p = off + 4;
+    while out.len() < n && p < b.len() {
+        let e = b[p..].iter().position(|&c| c == 0).map_or(b.len(), |x| p + x);
+        out.push(String::from_utf8_lossy(&b[p..e]).into_owned());
+        p = e + 1;
+    }
+    out
+}
+
+/// 二进制 KeyValues：类型 1 字节、键、值；0 子节、1 字符串、2 int32、3 float、4 指针、5 宽字符串、6 颜色、7 uint64、10 int64，8 和 11 是节尾
+struct Kv<'a> {
+    b: &'a [u8],
+    i: usize,
+    strings: Option<&'a [String]>,
+}
+
+impl Kv<'_> {
+    fn cstr(&mut self) -> Option<String> {
+        let e = self.b.get(self.i..)?.iter().position(|&c| c == 0)? + self.i;
+        let s = String::from_utf8_lossy(&self.b[self.i..e]).into_owned();
+        self.i = e + 1;
+        Some(s)
+    }
+    fn take(&mut self, n: usize) -> Option<&[u8]> {
+        let s = self.b.get(self.i..self.i + n)?;
+        self.i += n;
+        Some(s)
+    }
+    fn key(&mut self) -> Option<String> {
+        match self.strings {
+            Some(t) => {
+                let x = self.take(4)?;
+                t.get(u32::from_le_bytes([x[0], x[1], x[2], x[3]]) as usize).cloned()
+            }
+            None => self.cstr(),
+        }
+    }
+    fn object(&mut self) -> Map<String, Value> {
+        let mut m = Map::new();
+        while let Some(&t) = self.b.get(self.i) {
+            self.i += 1;
+            if t == 8 || t == 11 {
+                break;
+            }
+            let Some(k) = self.key() else { break };
+            let v = match t {
+                0 => Value::Object(self.object()),
+                1 => match self.cstr() {
+                    Some(s) => json!(s),
+                    None => break,
+                },
+                2 | 4 | 6 => match self.take(4) {
+                    Some(x) => json!(i32::from_le_bytes([x[0], x[1], x[2], x[3]])),
+                    None => break,
+                },
+                3 => match self.take(4) {
+                    Some(x) => json!(f32::from_le_bytes([x[0], x[1], x[2], x[3]])),
+                    None => break,
+                },
+                7 | 10 => match self.take(8) {
+                    Some(x) => json!(i64::from_le_bytes(x.try_into().unwrap_or_default())),
+                    None => break,
+                },
+                5 => {
+                    // 宽字符串：两字节一个，到 0x0000
+                    let mut u = vec![];
+                    while let Some(x) = self.take(2) {
+                        let c = u16::from_le_bytes([x[0], x[1]]);
+                        if c == 0 {
+                            break;
+                        }
+                        u.push(c);
+                    }
+                    json!(String::from_utf16_lossy(&u))
+                }
+                _ => break,
+            };
+            m.insert(k, v);
+        }
+        m
+    }
+}
+
 // ---------- 注册表 ----------
 
 /// Steam 现在的样子
@@ -409,11 +536,19 @@ impl Steam {
         if pt.is_empty() {
             return;
         }
-        let names = installed(root);
+        let mut names = installed(root);
+        for id in pt.iter().map(|p| p.0).filter(|id| !names.contains_key(id)).collect::<Vec<_>>() {
+            if let Some(n) = registry_name(id) {
+                names.insert(id, n);
+            }
+        }
+        // 没装的游戏：名字只在 Steam 缓存的 appinfo.vdf 里
+        let missing: BTreeSet<u32> = pt.iter().map(|p| p.0).filter(|id| !names.contains_key(id)).collect();
+        names.extend(appinfo_names(root, &missing));
         let apps: Vec<Value> = pt
             .iter()
             .map(|(id, min, last)| {
-                let name = names.get(id).cloned().or_else(|| registry_name(*id));
+                let name = names.get(id).cloned();
                 let last = (*last > 0).then(|| Utc.timestamp_opt(*last, 0).single()).flatten().map(iso);
                 json!({"appid": id, "name": name, "playtime_min": min, "last_played": last})
             })
@@ -436,7 +571,7 @@ pub fn start(log: Arc<EventLog>, paused: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let mut s = Steam::new(&beayy_core::data_root(), log, paused);
         loop {
-            if crate::enabled() {
+            if crate::game_on("steam") {
                 s.step(&read_now(), Utc::now());
             } else {
                 s.stop(Utc::now());
@@ -462,7 +597,10 @@ mod tests {
     }
 
     fn fake_steam() -> (PathBuf, PathBuf) {
-        let base = std::env::temp_dir().join(format!("beayy-steam-{}-{}", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        // 测试并行跑：macOS 的时钟只到微秒，两个测试可能拿到同一个时刻、共用一个目录（先跑完的删掉，后面的就读不到），加个计数
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!("beayy-steam-{}-{}-{n}", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap_or(0)));
         let root = base.join("Steam");
         let lib2 = base.join("Lib2");
         std::fs::create_dir_all(root.join("steamapps")).unwrap();
@@ -480,6 +618,87 @@ mod tests {
         )
         .unwrap();
         (base, root)
+    }
+
+    /// 造一个 appinfo.vdf：v29 用字符串表、v28 键名直接写
+    fn appinfo_bytes(v29: bool, apps: &[(u32, &str)]) -> Vec<u8> {
+        let table = ["appinfo", "appid", "common", "name", "type"];
+        let key = |out: &mut Vec<u8>, k: &str| {
+            if v29 {
+                out.extend((table.iter().position(|x| *x == k).unwrap() as u32).to_le_bytes());
+            } else {
+                out.extend(k.as_bytes());
+                out.push(0);
+            }
+        };
+        let mut body = vec![];
+        for (id, name) in apps {
+            let mut kv = vec![0u8];
+            key(&mut kv, "appinfo");
+            kv.push(2);
+            key(&mut kv, "appid");
+            kv.extend(id.to_le_bytes());
+            kv.push(0);
+            key(&mut kv, "common");
+            kv.push(1);
+            key(&mut kv, "type");
+            kv.extend(b"Game\0");
+            kv.push(1);
+            key(&mut kv, "name");
+            kv.extend(name.as_bytes());
+            kv.push(0);
+            kv.extend([8, 8, 8]);
+            let mut e = vec![0u8; 60];
+            e.extend(kv);
+            body.extend(id.to_le_bytes());
+            body.extend((e.len() as u32).to_le_bytes());
+            body.extend(e);
+        }
+        body.extend(0u32.to_le_bytes());
+        let mut out = vec![];
+        if v29 {
+            out.extend(0x0756_4429u32.to_le_bytes());
+            out.extend(1u32.to_le_bytes());
+            out.extend(((16 + body.len()) as u64).to_le_bytes());
+            out.extend(body);
+            out.extend((table.len() as u32).to_le_bytes());
+            for k in table {
+                out.extend(k.as_bytes());
+                out.push(0);
+            }
+        } else {
+            out.extend(0x0756_4428u32.to_le_bytes());
+            out.extend(1u32.to_le_bytes());
+            out.extend(body);
+        }
+        out
+    }
+
+    #[test]
+    fn appinfo() {
+        let (base, root) = fake_steam();
+        std::fs::create_dir_all(root.join("appcache")).unwrap();
+        let want = BTreeSet::from([30, 99]);
+        for v29 in [true, false] {
+            std::fs::write(root.join("appcache/appinfo.vdf"), appinfo_bytes(v29, &[(5, "别的"), (30, "余烬之路"), (31, "Not wanted")])).unwrap();
+            assert_eq!(appinfo_names(&root, &want), BTreeMap::from([(30, "余烬之路".to_string())]));
+        }
+        // 认不得的版本、截断的文件：不报错，读不到就算了
+        std::fs::write(root.join("appcache/appinfo.vdf"), [0x27u8, 0x44, 0x56, 0x07, 1, 0, 0, 0]).unwrap();
+        assert!(appinfo_names(&root, &want).is_empty());
+        let mut cut = appinfo_bytes(true, &[(30, "余烬之路")]);
+        cut.truncate(40);
+        std::fs::write(root.join("appcache/appinfo.vdf"), cut).unwrap();
+        assert!(appinfo_names(&root, &want).is_empty());
+        // 游戏库里没装的 30 号也带上名字
+        let data = base.join("data");
+        std::fs::write(root.join("appcache/appinfo.vdf"), appinfo_bytes(true, &[(30, "余烬之路")])).unwrap();
+        let mut s = Steam::new(&data, Arc::new(EventLog::new(data.clone(), "win-test")), Arc::new(AtomicBool::new(false)));
+        s.step(&Now { root: Some(root.clone()), running: 0, active_user: Some(42) }, Utc::now());
+        let lib = read(&data).into_iter().find(|e| e["event_type"] == "steam.library").unwrap();
+        let names: Vec<(i64, Value)> = lib["apps"].as_array().unwrap().iter().map(|a| (a["appid"].as_i64().unwrap(), a["name"].clone())).collect();
+        assert_eq!(names, vec![(10, json!("雾港")), (30, json!("余烬之路"))]);
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

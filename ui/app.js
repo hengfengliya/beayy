@@ -100,6 +100,7 @@ async function callRaw(cmd, args = {}) {
     }
     case "get_game": { const all = await loadMock("get_game").catch(() => ({})); return all[args.id] || null; }
     case "games_overview": { const all = await loadMock(cmd); return all[args.game] || all[all.default]; }
+    case "game_icons": return {}; // 样例不带英雄、装备图（那是 Riot 的图），只显示首字
     case "pick_bill_files": return [];
     case "set_bill_class": case "rebuild_bills": console.info(`样例模式：${cmd}`, args); return null;
     case "classify_bills_ai": return { asked: 0, done: 0, error: null };
@@ -2364,6 +2365,10 @@ async function renderMoney(arg) {
 const GM = { game: null, tab: "overview", range: "30", data: null };
 /** 支持的游戏（id → 名字）；再加一款在这里和 games.rs 各加一项 */
 const GM_GAMES = { lol: "英雄联盟", steam: "Steam" };
+/** 设置 → 功能 → 游戏下面每款的说明 */
+const GM_DESC = { lol: "Windows 上读客户端，记每一局的战绩", steam: "Windows 上记在玩哪款、每次玩了多久" };
+/** 开着的游戏（总开关开了以后，每款自己的开关默认开） */
+const gmOn = () => Object.keys(GM_GAMES).filter((k) => S.settings && S.settings["games_" + k] !== false);
 const GM_TIER = { IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金", PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石", MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者" };
 const GM_QUEUE = { RANKED_SOLO_5x5: "单双排", RANKED_FLEX_SR: "灵活排位", RANKED_TFT: "云顶之弈", RANKED_TFT_DOUBLE_UP: "云顶双人" };
 const GM_REGION = { HN1: "艾欧尼亚", HN10: "黑色玫瑰", BGP2: "峡谷之巅" };
@@ -2376,6 +2381,54 @@ const gmDay = (date) => (LANG === "zh" ? `${+date.slice(5, 7)} 月 ${+date.slice
 const gmDayOf = (iso) => localDay(new Date(iso));
 const gmLp = (r) => (!r ? "" : r.lp != null ? (r.lp > 0 ? `+${r.lp}` : r.lp < 0 ? `−${-r.lp}` : "0") : `→ ${gmTier(r.to)}`);
 const gmCounted = (ms) => ms.filter((m) => !m.remake && typeof m.win === "boolean");
+const gmWinCls = (m) => (m.remake ? "is-remake" : m.win === true ? "is-win" : m.win === false ? "is-loss" : "");
+const gmWho = (p) => `${esc(p.name || "—")}${p.tag ? `<span class="gm-tag">#${esc(p.tag)}</span>` : ""}`;
+
+/** 英雄、装备、召唤师技能的图标（src-tauri/src/games.rs 的 game_icons，CommunityDragon 的公开图，取过的存在本机）：
+ *  先画一个写着首字的方块，gmLoadIcons 取到了再换成图 */
+const GMI = { champ: {}, item: {}, spell: {} };
+function gmIc(kind, id, alt = "", cls = "") {
+  if (!id) return `<span class="gm-ic gm-ic--${kind} is-empty ${cls}"></span>`;
+  const u = GMI[kind][id];
+  if (u) return `<img class="gm-ic gm-ic--${kind} ${cls}" src="${u}" alt="${esc(alt)}"${alt ? ` title="${esc(alt)}"` : ""}>`;
+  return `<span class="gm-ic gm-ic--${kind} ${cls}"${u === undefined ? ` data-gic="${kind}:${id}"` : ""}${alt ? ` title="${esc(alt)}"` : ""}>${esc([...(alt || "")][0] || "")}</span>`;
+}
+async function gmLoadIcons(root) {
+  if (!root) return;
+  const want = { champ: new Set(), item: new Set(), spell: new Set() };
+  root.querySelectorAll("[data-gic]").forEach((el) => { const [k, id] = el.dataset.gic.split(":"); if (GMI[k][id] === undefined) want[k].add(+id); });
+  await Promise.all(Object.entries(want).filter(([, ids]) => ids.size).map(async ([k, ids]) => {
+    const r = await call("game_icons", { kind: k, ids: [...ids] }).catch(() => ({}));
+    for (const id of ids) GMI[k][id] = r[id] || null;
+  }));
+  root.querySelectorAll("[data-gic]").forEach((el) => {
+    const [k, id] = el.dataset.gic.split(":"), u = GMI[k][id];
+    el.removeAttribute("data-gic");
+    if (!u) return;
+    const img = document.createElement("img");
+    img.className = el.className; img.src = u; img.alt = el.title || ""; if (el.title) img.title = el.title;
+    el.replaceWith(img);
+  });
+}
+
+/** 线条图标（lucide） */
+const GM_SVG = {
+  crown: '<path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  drop: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+  swords: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+};
+const gmI = (k) => lu(GM_SVG[k]);
+/** 徽章：代码 → [文字, 图标]（games.rs 的 badges） */
+const GM_BADGE = { mvp: ["MVP", "crown"], svp: ["SVP", "crown"], penta: ["五杀", "flame"], quadra: ["四杀", "flame"], triple: ["三杀", "flame"], fb: ["一血", "drop"], top_dmg: ["伤害最高", "swords"], top_tank: ["承伤最高", "shield"] };
+const gmBadges = (bs) => (bs || []).filter((b) => GM_BADGE[b]).map((b) => `<span class="gm-badge gm-badge--${b}">${gmI(GM_BADGE[b][1])}${esc(tr(GM_BADGE[b][0]))}</span>`).join("");
+/** 表头：图标＋字 */
+const gmTh = (icon, text) => `${gmI(icon)}<span>${esc(text)}</span>`;
 
 /** 选的这段时间里的局和天（近 7 天、近 30 天按本地日算，含今天） */
 function gmView() {
@@ -2445,7 +2498,7 @@ function gmRankTable(rank) {
 
 function gmChampTable(cs, cls = "") {
   return `<div class="mx-table-wrap"><table class="mx-table gm-t gm-champs ${cls}"><thead><tr><th>${tr("英雄")}</th><th class="is-num g-n">${tr("局数")}</th><th class="is-num g-n">${tr("胜率")}</th><th class="is-num g-kda">${tr("场均 K/D/A")}</th><th class="is-num g-n">KDA</th><th class="is-num g-dmg">${tr("场均伤害")}</th><th class="is-num g-dur">${tr("场均时长")}</th><th class="is-num g-n">${tr("最近")}</th></tr></thead><tbody>
-    ${cs.map((c) => `<tr data-gchamp="${c.id}"><td>${esc(c.name || `#${c.id}`)}</td><td class="is-num">${c.n}</td><td class="is-num">${sharePct(c.w / c.n)}</td><td class="is-num">${[c.k, c.d, c.a].map((v) => (v / c.n).toFixed(1)).join("/")}</td><td class="is-num">${gmRatio(c.k, c.d, c.a)}</td><td class="is-num">${gmNum(c.dmg / c.n)}</td><td class="is-num">${durText(c.dur / c.n)}</td><td class="is-num">${gmDayOf(c.last).slice(5)}</td></tr>`).join("")}</tbody></table></div>`;
+    ${cs.map((c) => `<tr data-gchamp="${c.id}"><td><span class="gm-cell">${gmIc("champ", c.id, c.name)}<span>${esc(c.name || `#${c.id}`)}</span></span></td><td class="is-num">${c.n}</td><td class="is-num">${sharePct(c.w / c.n)}</td><td class="is-num">${[c.k, c.d, c.a].map((v) => (v / c.n).toFixed(1)).join("/")}</td><td class="is-num">${gmRatio(c.k, c.d, c.a)}</td><td class="is-num">${gmNum(c.dmg / c.n)}</td><td class="is-num">${durText(c.dur / c.n)}</td><td class="is-num">${gmDayOf(c.last).slice(5)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function gmOverview(v) {
@@ -2464,7 +2517,21 @@ function gmOverview(v) {
     ${section(tr("每天"), gmDayChart(v.days, v.cut))}
     ${v.days.some((x) => x.games.length) ? section(tr("什么时候玩"), gmTimeline(v.days)) : ""}
     ${champs.length ? section(tr("常玩英雄"), gmChampTable(champs)) : ""}
+    ${gmFriends(v)}
     ${gmRankTable(GM.data.rank)}</div>`;
+}
+
+/** 常一起玩的：这段时间里同队打过 5 局以上的人（games.rs 的 friends） */
+function gmFriends(v) {
+  const by = new Map(v.matches.map((m) => [m.id, m]));
+  const fs = (GM.data.friends || []).map((f) => {
+    const ms = f.games.map((id) => by.get(id)).filter(Boolean);
+    return { ...f, n: ms.length, w: ms.filter((m) => m.win).length, last: ms.map((m) => m.start).sort().pop() };
+  }).filter((f) => f.n >= 5).sort((a, b) => b.n - a.n);
+  if (!fs.length) return "";
+  return section(tr("常一起玩的"), `<div class="mx-table-wrap"><table class="mx-table gm-t gm-friends"><thead><tr><th>${tr("玩家")}</th><th class="is-num g-n">${tr("一起打")}</th><th class="is-num g-n">${tr("胜率")}</th><th class="is-num g-n">${tr("最近")}</th></tr></thead><tbody>
+    ${fs.map((f) => `<tr><td><span class="gm-cell">${gmI("users")}<span>${gmWho(f)}</span></span></td><td class="is-num">${tr("{n} 局", { n: f.n })}</td><td class="is-num">${sharePct(f.w / f.n)}</td><td class="is-num">${gmDayOf(f.last).slice(5)}</td></tr>`).join("")}</tbody></table></div>`,
+    { aside: esc(tr("同队 5 局以上")) });
 }
 
 function gmList(v) {
@@ -2474,8 +2541,15 @@ function gmList(v) {
   for (const m of v.matches) { const d = gmDayOf(m.start); if (!groups.length || groups[groups.length - 1][0] !== d) groups.push([d, []]); groups[groups.length - 1][1].push(m); }
   return `<div class="secs-plain">${groups.map(([d, ms]) => {
     const c = gmCounted(ms), w = c.filter((m) => m.win).length;
-    return `<div id="gm-d-${d}">${section(gmDay(d), `<div class="mx-table-wrap"><table class="mx-table gm-t gm-games"><thead><tr><th class="g-time">${tr("时间")}</th><th>${tr("模式")}</th><th>${tr("英雄")}</th><th class="g-res">${tr("结果")}</th><th class="is-num">K/D/A</th><th class="is-num">${tr("伤害")}</th><th class="is-num">${tr("时长")}</th>${ranked ? `<th class="is-num">${tr("胜点")}</th>` : ""}</tr></thead><tbody>
-      ${ms.map((m) => `<tr data-game="${m.id}"${m.remake ? ' class="is-remake"' : ""}><td class="mx-num">${hm(m.start)}</td><td>${esc(m.queue || "")}</td><td>${esc(m.champ || `#${m.champ_id}`)}</td><td>${gmResult(m)}</td><td class="is-num">${gmKda(m)}</td><td class="is-num">${gmNum(m.dmg)}${m.dmg_share != null ? `<small class="gm-sub">${sharePct(m.dmg_share)}</small>` : ""}</td><td class="is-num">${durText(m.dur)}</td>${ranked ? `<td class="is-num">${esc(gmLp(m.rank))}</td>` : ""}</tr>`).join("")}</tbody></table></div>`,
+    return `<div id="gm-d-${d}">${section(gmDay(d), `<div class="gm-games">${ms.map((m) => `<button class="gm-row ${gmWinCls(m)}" data-game="${m.id}">
+        <span class="gm-res"><b>${gmResult(m)}</b><small>${durText(m.dur)}</small></span>
+        <span class="gm-pick">${gmIc("champ", m.champ_id, m.champ, "gm-ic--lg")}<span class="gm-sp">${(m.spells || []).map((id) => gmIc("spell", id)).join("")}</span></span>
+        <span class="gm-what"><b>${esc(m.champ || `#${m.champ_id}`)}</b><small>${hm(m.start)} · ${esc(m.queue || "")}</small></span>
+        <span class="gm-kda"><b>${gmKda(m)}</b><small>KDA ${gmRatio(m.k, m.d, m.a)}</small></span>
+        <span class="gm-dmg"><b>${gmNum(m.dmg)}</b><small>${[m.dmg_share != null ? tr("伤害占比 {v}", { v: sharePct(m.dmg_share) }) : "", m.kp != null ? tr("参团 {v}", { v: sharePct(m.kp) }) : ""].filter(Boolean).join(" · ")}</small></span>
+        <span class="gm-items">${(m.items || []).map((id, i) => gmIc("item", id, "", i === 6 ? "is-trinket" : "")).join("")}</span>
+        <span class="gm-badges">${gmBadges(m.badges)}${ranked && m.rank ? `<span class="gm-lp">${esc(gmLp(m.rank))}</span>` : ""}</span>
+      </button>`).join("")}</div>`,
       { aside: esc([tr("{n} 局", { n: ms.length }), c.length ? tr("{w} 胜 {l} 负", { w, l: c.length - w }) : ""].filter(Boolean).join(" · ")) })}</div>`;
   }).join("")}</div>`;
 }
@@ -2495,7 +2569,7 @@ function gmSteamView() {
   return { cut, sessions: d.sessions.filter((x) => !cut || gmDayOf(x.start) >= cut), days: d.days.filter((x) => !cut || x.date >= cut) };
 }
 
-/** 每款：这段时间玩了几次、多久、最近一次；累计是 Steam 自己记的总时长。选「全部」时没在 Beayy 里记过的也列上（只列有名字的：没装的游戏本机读不到名字） */
+/** 每款：这段时间玩了几次、多久、最近一次；累计是 Steam 自己记的总时长。选「全部」时没在 Beayy 里记过的也列上 */
 function gmSteamApps(ss) {
   const lib = new Map((GM.data.library || []).map((a) => [a.appid, a]));
   const by = new Map();
@@ -2505,7 +2579,7 @@ function gmSteamApps(ss) {
     if (x.start > a.last) a.last = x.start;
     by.set(x.appid, a);
   }
-  if (GM.range === "all") for (const l of lib.values()) if (!by.has(l.appid) && l.name) by.set(l.appid, { appid: l.appid, name: l.name, n: 0, play: 0, last: l.last });
+  if (GM.range === "all") for (const l of lib.values()) if (!by.has(l.appid)) by.set(l.appid, { appid: l.appid, name: l.name, n: 0, play: 0, last: l.last });
   return [...by.values()].map((a) => ({ ...a, total: lib.has(a.appid) ? lib.get(a.appid).total_min * 60 : null })).sort((a, b) => b.play - a.play || (b.total || 0) - (a.total || 0));
 }
 
@@ -2535,6 +2609,7 @@ function drawGames() {
   if (GM.data.game === "steam") { body.innerHTML = gmSteamOverview(gmSteamView()); return; }
   const v = gmView();
   body.innerHTML = GM.tab === "list" ? gmList(v) : GM.tab === "champs" ? gmChampsBody(v) : gmOverview(v);
+  gmLoadIcons(body);
 }
 
 async function renderGames(arg) {
@@ -2544,15 +2619,23 @@ async function renderGames(arg) {
     document.getElementById("gm-enable").onclick = () => { SS.tab = "features"; location.hash = "#/settings"; };
     return;
   }
-  if (arg && GM_GAMES[arg]) GM.game = arg;
-  const d = await call("games_overview", GM.game ? { game: GM.game } : {});
+  const on = gmOn();
+  if (!on.length) {
+    $app.innerHTML = header(tr("游戏")) + `<div class="reading">${emptyBlock("day", tr("没开要记的游戏"), `<div class="empty-acts"><button class="mx-btn mx-btn--primary" id="gm-enable">${tr("去设置里打开")}</button></div>`)}</div>`;
+    document.getElementById("gm-enable").onclick = () => { SS.tab = "features"; location.hash = "#/settings"; };
+    return;
+  }
+  if (arg && on.includes(arg)) GM.game = arg;
+  if (GM.game && !on.includes(GM.game)) GM.game = null;
+  let d = await call("games_overview", GM.game ? { game: GM.game } : {});
+  // 没指定时后台挑最近玩的那款；那款关着就换成开着的第一款
+  if (!on.includes(d.game)) d = await call("games_overview", { game: on[0] });
   if (stale(tk)) return;
   GM.data = d;
   GM.game = d.game;
   const steam = d.game === "steam";
-  const list = (d.games || []).map((g) => g.id);
   const pick = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="gm-game" aria-haspopup="menu" aria-expanded="false">${esc(tr(GM_GAMES[GM.game]))}${ICON.chevD}</button>
-      <div class="mx-menu" role="menu" hidden>${Object.keys(GM_GAMES).filter((k) => list.includes(k) || k === GM.game).map((k) => `<button role="menuitemradio" aria-checked="${k === GM.game}" data-ggame="${k}">${esc(tr(GM_GAMES[k]))}${k === GM.game ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
+      <div class="mx-menu" role="menu" hidden>${on.map((k) => `<button role="menuitemradio" aria-checked="${k === GM.game}" data-ggame="${k}">${esc(tr(GM_GAMES[k]))}${k === GM.game ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
   if (!(steam ? d.sessions : d.matches).length) {
     $app.innerHTML = header(tr("游戏"), pick) + `<div class="reading">${emptyBlock("day", steam ? tr("在 Windows 电脑的 Beayy 里也打开「游戏」，玩 Steam 游戏的时长会记在这里") : tr("在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里"))}</div>`;
     bindPick(document.getElementById("gm-game"));
@@ -2589,13 +2672,24 @@ async function gmGameDialog(id) {
   const m = g.match;
   const facts = [[tr("开局"), `${gmDay(gmDayOf(m.start))} ${hm(m.start)}`], [tr("模式"), m.queue], [tr("时长"), durText(m.dur)], [tr("胜点"), gmLp(m.rank)],
     [tr("排队"), m.phases ? durText(m.phases.queue) : ""], [tr("选人"), m.phases ? durText(m.phases.select) : ""], [tr("读条"), m.phases ? durText(m.phases.load) : ""], [tr("版本"), (m.version || "").split(".").slice(0, 2).join(".")]].filter(([, v]) => v);
-  const team = (t) => `<h3 class="gm-team">${esc([t.mine ? tr("我方") : tr("对方"), t.win ? tr("胜") : tr("负"), tr("{n} 杀", { n: t.kills }), tr("伤害 {v}", { v: gmNum(t.dmg) })].join(" · "))}</h3>
-    <div class="mx-table-wrap"><table class="mx-table gm-t gm-players"><thead><tr><th>${tr("英雄")}</th><th>${tr("玩家")}</th><th class="is-num">K/D/A</th><th class="is-num">${tr("伤害")}</th><th class="is-num">${tr("金币")}</th><th class="is-num">${tr("补刀")}</th></tr></thead><tbody>
-    ${t.players.map((p) => `<tr${p.me ? ' class="is-me"' : ""}><td>${esc(p.champ || `#${p.champ_id}`)}</td><td title="${esc(p.name + (p.tag ? "#" + p.tag : ""))}">${esc(p.name || "—")}</td><td class="is-num">${gmKda(p)}</td><td class="is-num">${gmNum(p.dmg)}</td><td class="is-num">${gmNum(p.gold)}</td><td class="is-num">${p.cs}</td></tr>`).join("")}</tbody></table></div>
-    ${t.bans.length ? `<p class="gm-bans">${esc(tr("禁用：{v}", { v: t.bans.map((b) => b.name || `#${b.id}`).join("、") }))}</p>` : ""}`;
+  // 伤害条按这一局伤害最高的那个人算满
+  const top = Math.max(1, ...g.teams.flatMap((t) => t.players.map((p) => p.dmg)));
+  const team = (t) => `<div class="gm-team ${t.win ? "is-win" : "is-loss"}">
+    <h3><b>${esc(`${t.mine ? tr("我方") : tr("对方")} · ${t.win ? tr("胜") : tr("负")}`)}</b><span>${esc([tr("{n} 杀", { n: t.kills }), tr("伤害 {v}", { v: gmNum(t.dmg) }), tr("金币 {v}", { v: gmNum(t.gold) })].join(" · "))}</span></h3>
+    <div class="gm-pl gm-pl-head"><span></span><span>${esc(tr("玩家"))}</span><span class="is-num">K/D/A</span><span>${gmTh("swords", tr("伤害"))}</span><span class="is-num">${gmTh("coins", tr("金币"))}</span><span class="is-num">${gmTh("target", tr("补刀"))}</span><span>${esc(tr("装备"))}</span></div>
+    ${t.players.map((p) => `<div class="gm-pl${p.me ? " is-me" : ""}">
+      <span class="gm-pick">${gmIc("champ", p.champ_id, p.champ, "gm-ic--lg")}<span class="gm-sp">${(p.spells || []).map((sid) => gmIc("spell", sid)).join("")}</span></span>
+      <span class="gm-pwho"><span class="gm-nm" title="${esc(p.champ || "")}">${gmWho(p)}</span><span class="gm-badges">${gmBadges(p.badges)}</span></span>
+      <span class="gm-kda is-num"><b>${gmKda(p)}</b><small>KDA ${gmRatio(p.k, p.d, p.a)}</small></span>
+      <span class="gm-dbar" title="${esc(tr("承伤 {v}", { v: gmNum(p.taken) }))}"><b>${gmNum(p.dmg)}</b><i style="width:${(p.dmg / top * 100).toFixed(1)}%"></i></span>
+      <span class="is-num">${gmNum(p.gold)}</span>
+      <span class="is-num">${p.cs}</span>
+      <span class="gm-items">${(p.items || []).map((it, i) => gmIc("item", it, "", i === 6 ? "is-trinket" : "")).join("")}</span>
+    </div>`).join("")}
+    ${t.bans.length ? `<p class="gm-bans"><span>${esc(tr("禁用"))}</span>${t.bans.map((b) => gmIc("champ", b.id, b.name || `#${b.id}`, "gm-ic--sm")).join("")}</p>` : ""}</div>`;
   openDialog({ title: `${m.champ || "—"} · ${gmResult(m)}`, cancel: tr("关闭"),
     body: `<dl class="mx-facts gm-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>${g.teams.map(team).join("")}`,
-    onOpen: (el) => el.classList.add("gm-dlg") });
+    onOpen: (el) => { el.classList.add("gm-dlg"); gmLoadIcons(el); } });
 }
 
 // ---------- 规矩 ----------
@@ -3687,7 +3781,9 @@ async function renderSettings() {
     body = (mobile ? phoneSection() : "") + (mobile ? section(tr("服务"), servicesRows(cf, st)) : group(servicesRows(cf, st)));
   } else if (tab === "features") {
     // 可选的功能，默认都关；每台电脑各自开
-    body = group(setRow(tr("游戏"), tr("Windows 上记英雄联盟的每一局、Steam 每款游戏玩了多久；侧栏出现「游戏」"), `<button class="mx-switch" role="switch" id="games-on" aria-checked="${!!cf.games}" aria-label="${tr("游戏")}"></button>`));
+    // 游戏：总开关默认关；打开后下面每款各一个开关，默认开
+    const sub = cf.games ? `<div class="set-sub">${Object.entries(GM_GAMES).map(([k, v]) => setRow(esc(tr(v)), tr(GM_DESC[k]), `<button class="mx-switch" role="switch" data-game-on="${k}" aria-checked="${cf["games_" + k] !== false}" aria-label="${esc(tr(v))}"></button>`)).join("")}</div>` : "";
+    body = group(setRow(tr("游戏"), tr("侧栏出现「游戏」，记下面开着的游戏"), `<button class="mx-switch" role="switch" id="games-on" aria-checked="${!!cf.games}" aria-label="${tr("游戏")}"></button>`) + sub);
   } else {
     body = syncPanel(sy) + devicesPanel(devs || [], st) + (SS.storage ? storageView(SS.storage) : "");
   }
@@ -3721,7 +3817,10 @@ async function renderSettings() {
     on("login", async () => { try { await call("set_login_item", { on: !st.login_item }); } catch (x) { alert(tr("没改成：{err}", { err: x })); } renderSettings(); });
     on("font-edit", () => fontDialog(renderSettings));
   }
-  if (tab === "features") on("games-on", async () => { await saveSome({ games: !cf.games }); renderSide(); renderSettings(); });
+  if (tab === "features") {
+    on("games-on", async () => { await saveSome({ games: !cf.games }); renderSide(); renderSettings(); });
+    document.querySelectorAll("[data-game-on]").forEach((b) => (b.onclick = async () => { const k = "games_" + b.dataset.gameOn; await saveSome({ [k]: cf[k] === false }); renderSettings(); }));
+  }
   if (tab === "record") {
     on("pause-off", async () => { await call("set_paused", { paused: false }); renderSettings(); });
     on("pause-open", () => choiceDialog({ title: tr("暂停记录"), options: PAUSES, note: tr("暂停期间不记录，到时间自动继续"), ok: tr("暂停"),

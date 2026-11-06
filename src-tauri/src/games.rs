@@ -1,6 +1,6 @@
 //! 游戏：按游戏分开汇总，英雄联盟（lol）和 Steam（steam）；再加一款就在 GAMES 加一项、写它自己的汇总。
 //! 英雄联盟：各台 Windows 电脑上 crates/beayy-games 记的 game.* 事件随分段同步过来，这里汇成对局、每天、英雄、段位。
-//! 设置 → 功能 → 游戏（settings.json 的 games）默认开，关掉后：关着采集端不读客户端、侧栏不出游戏页，已记的照样能读。
+//! 设置 → 功能 → 游戏（settings.json 的 games）总开关默认关，打开后每款游戏各有开关（games_lol、games_steam，默认开）；关着的采集端不读、页面不列，已记的照样能读。
 //! 方案见 报告/方案_20261106_英雄联盟接入.md。都是读的时候现算、不另存；只看 win- 开头的设备（Mac 版客户端以后再接）。
 //! - 一局：game.match（对局开始时刻、自己那一行的统计、raw＝客户端原样返回的 10 个人）。
 //! - 排队、选人、读条多久：game.phase 的阶段变化，同一台电脑上从离开大厅到回到大厅算一轮，轮里带着 gameId 的就是那一局；
@@ -9,7 +9,7 @@
 //! Steam：steam.session（start 开始、end 结束带时长），steam.library（每款总时长，变了才写）。见 steam_overview。
 
 use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const TYPES: [&str; 6] = ["game.match", "game.rank", "game.client", "game.phase", "steam.session", "steam.library"];
@@ -184,6 +184,53 @@ fn is_night(t: DateTime<Utc>) -> bool {
     h >= 23 || h < 5
 }
 
+/// 这一局每个人的徽章（participantId → 代码）：胜方表现最好的 mvp、负方的 svp；最大的多杀 penta／quadra／triple；
+/// 一血 fb；全场伤害最高 top_dmg、承伤最高 top_tank。表现分＝伤害占全队的比例×3＋参团率×2＋KDA（最多算 10）×0.2。重开的局不给
+fn badges(raw: &Value) -> HashMap<i64, Vec<&'static str>> {
+    let mut out: HashMap<i64, Vec<&'static str>> = HashMap::new();
+    let ps: Vec<&Value> = raw["participants"].as_array().into_iter().flatten().collect();
+    if ps.is_empty() || int(&raw["gameDuration"]) < REMAKE_S {
+        return out;
+    }
+    let team_sum = |tid: i64, f: &dyn Fn(&Value) -> i64| ps.iter().filter(|p| int(&p["teamId"]) == tid).map(|p| f(p)).sum::<i64>();
+    let score = |p: &Value| {
+        let s = &p["stats"];
+        let tid = int(&p["teamId"]);
+        let (k, d, a) = (int(&s["kills"]) as f64, int(&s["deaths"]) as f64, int(&s["assists"]) as f64);
+        let td = team_sum(tid, &dmg_of).max(1) as f64;
+        let tk = team_sum(tid, &|q| int(&q["stats"]["kills"])).max(1) as f64;
+        3.0 * dmg_of(p) as f64 / td + 2.0 * (k + a) / tk + 0.2 * ((k + a) / d.max(1.0)).min(10.0)
+    };
+    let best = |win: bool| ps.iter().filter(|p| p["stats"]["win"].as_bool() == Some(win)).max_by(|a, b| score(a).total_cmp(&score(b))).map(|p| int(&p["participantId"]));
+    if let Some(id) = best(true) {
+        out.entry(id).or_default().push("mvp");
+    }
+    if let Some(id) = best(false) {
+        out.entry(id).or_default().push("svp");
+    }
+    for p in &ps {
+        let s = &p["stats"];
+        let id = int(&p["participantId"]);
+        let multi = if int(&s["pentaKills"]) > 0 { Some("penta") } else if int(&s["quadraKills"]) > 0 { Some("quadra") } else if int(&s["tripleKills"]) > 0 { Some("triple") } else { None };
+        out.entry(id).or_default().extend(multi);
+        if s["firstBloodKill"].as_bool() == Some(true) {
+            out.entry(id).or_default().push("fb");
+        }
+    }
+    let top = |f: &dyn Fn(&Value) -> i64| ps.iter().max_by_key(|p| f(p)).filter(|p| f(p) > 0).map(|p| int(&p["participantId"]));
+    if let Some(id) = top(&dmg_of) {
+        out.entry(id).or_default().push("top_dmg");
+    }
+    if let Some(id) = top(&|p| int(&p["stats"]["totalDamageTaken"])) {
+        out.entry(id).or_default().push("top_tank");
+    }
+    out
+}
+
+fn items_of(p: &Value) -> Vec<i64> {
+    (0..7).map(|i| int(&p["stats"][format!("item{i}")])).collect()
+}
+
 /// 一局给页面的样子（不带 raw）
 fn light(e: &Value, puuids: &BTreeSet<String>, run: Option<&Run>, ranks: &[(DateTime<Utc>, &Value)]) -> Value {
     let raw = &e["raw"];
@@ -202,6 +249,8 @@ fn light(e: &Value, puuids: &BTreeSet<String>, run: Option<&Run>, ranks: &[(Date
         "kp": if tk > 0 { json!((k + a) as f64 / tk as f64) } else { Value::Null },
         "dmg_share": if team_dmg > 0 { json!(dmg as f64 / team_dmg as f64) } else { Value::Null },
         "spells": me.map(|p| json!([p["spell1Id"], p["spell2Id"]])),
+        "items": me.map(|p| json!(items_of(p))),
+        "badges": me.and_then(|p| badges(raw).remove(&int(&p["participantId"]))).unwrap_or_default(),
         "night": start_of(e).is_some_and(is_night),
     });
     if let Some(r) = run {
@@ -285,6 +334,7 @@ pub fn games_overview(game: Option<String>) -> Value {
         }
     }
     list.reverse();
+    let friends = friends_of(&ms, &puuids);
     let client = ev.iter().rev().find(|e| e["event_type"] == "game.client" && e["state"] == "connected");
     let account = client.map(|c| {
         json!({
@@ -301,9 +351,49 @@ pub fn games_overview(game: Option<String>) -> Value {
         "games": games,
         "account": account,
         "rank": rank,
+        "friends": friends,
         "matches": list,
         "days": days.into_iter().rev().map(|(date, d)| json!({ "date": date, "n": d.n, "w": d.w, "remakes": d.remakes, "play": d.play, "wait": d.wait, "night": d.night, "games": d.games })).collect::<Vec<_>>(),
     })
+}
+
+/// 和谁一起玩：同队出现过 2 局以上的人（页面按选的时间段再数、到 5 局才显示）；games 是一起打的那几局的 gameId
+fn friends_of(ms: &[&Value], puuids: &BTreeSet<String>) -> Vec<Value> {
+    struct F {
+        name: String,
+        tag: String,
+        games: Vec<i64>,
+        w: i64,
+        last: String,
+    }
+    let mut by: HashMap<String, F> = HashMap::new();
+    for e in ms {
+        let raw = &e["raw"];
+        let Some(me) = me_in(raw, puuids, int(&e["team_id"]), int(&e["champion_id"])) else { continue };
+        if int(&raw["gameDuration"]) < REMAKE_S {
+            continue;
+        }
+        let team = int(&me["teamId"]);
+        let mine = int(&me["participantId"]);
+        let on_team: BTreeSet<i64> = raw["participants"].as_array().into_iter().flatten().filter(|p| int(&p["teamId"]) == team && int(&p["participantId"]) != mine).map(|p| int(&p["participantId"])).collect();
+        for x in raw["participantIdentities"].as_array().into_iter().flatten() {
+            let pl = &x["player"];
+            let Some(puuid) = pl["puuid"].as_str().filter(|s| !s.is_empty() && !puuids.contains(*s)) else { continue };
+            if !on_team.contains(&int(&x["participantId"])) {
+                continue;
+            }
+            let f = by.entry(puuid.to_string()).or_insert(F { name: String::new(), tag: String::new(), games: vec![], w: 0, last: String::new() });
+            // 名字取最近一局的（改过名的以新名为准）
+            f.name = pl["gameName"].as_str().filter(|s| !s.is_empty()).or_else(|| pl["summonerName"].as_str()).unwrap_or("").to_string();
+            f.tag = pl["tagLine"].as_str().unwrap_or("").to_string();
+            f.games.push(int(&e["game_id"]));
+            f.w += (me["stats"]["win"] == true) as i64;
+            f.last = start_of(e).map(beayy_core::iso).unwrap_or_default();
+        }
+    }
+    let mut v: Vec<Value> = by.into_iter().filter(|(_, f)| f.games.len() >= 2).map(|(p, f)| json!({ "puuid": p, "name": f.name, "tag": f.tag, "n": f.games.len(), "w": f.w, "last": f.last, "games": f.games })).collect();
+    v.sort_by_key(|f| -int(&f["n"]));
+    v
 }
 
 /// 一局的 10 个人：自己那队在前
@@ -321,6 +411,7 @@ pub fn get_game(id: i64) -> Value {
     let me = me_in(raw, &puuids, int(&e["team_id"]), int(&e["champion_id"])).and_then(|p| p["participantId"].as_i64());
     let who: HashMap<i64, &Value> = raw["participantIdentities"].as_array().into_iter().flatten().filter_map(|x| Some((x["participantId"].as_i64()?, &x["player"]))).collect();
     let name = |cid: i64| names.get(&cid).cloned().map(Value::from).unwrap_or(Value::Null);
+    let mut marks = badges(raw);
     let mut teams: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
     for p in raw["participants"].as_array().into_iter().flatten() {
         let s = &p["stats"];
@@ -331,7 +422,8 @@ pub fn get_game(id: i64) -> Value {
             "name": nick, "tag": pl["tagLine"], "me": Some(pid) == me,
             "champ_id": p["championId"], "champ": name(int(&p["championId"])), "level": s["champLevel"],
             "k": s["kills"], "d": s["deaths"], "a": s["assists"], "cs": int(&s["totalMinionsKilled"]) + int(&s["neutralMinionsKilled"]),
-            "dmg": dmg_of(p), "gold": s["goldEarned"], "vision": s["visionScore"], "win": s["win"],
+            "dmg": dmg_of(p), "gold": s["goldEarned"], "vision": s["visionScore"], "win": s["win"], "taken": s["totalDamageTaken"],
+            "items": items_of(p), "spells": [p["spell1Id"], p["spell2Id"]], "badges": marks.remove(&pid).unwrap_or_default(),
         }));
     }
     let my_team = int(&e["team_id"]);
@@ -497,4 +589,101 @@ mod tests {
         // 凌晨 4:30 到 6:00：半小时
         assert_eq!(night_secs(at(4, 30), at(6, 0)), 1800);
     }
+}
+
+// ---------- 图标（英雄联盟）：CommunityDragon 的公开图（按编号取），取过的存在 Beayy/icons/lol/<kind>/ ----------
+
+const CDRAGON: &str = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default";
+
+fn icon_agent() -> ureq::Agent {
+    beayy_sync::http_agent(ureq::Agent::config_builder().proxy(None).tls_config(beayy_core::tls!()).timeout_global(Some(std::time::Duration::from_secs(10))).build())
+}
+
+/// Ok(None)＝服务器说没有（记下来不再取）；Err＝没连上（下次再试）
+fn fetch(ag: &ureq::Agent, url: &str) -> Result<Option<Vec<u8>>, ()> {
+    let mut r = ag.get(url).config().http_status_as_error(false).build().call().map_err(|_| ())?;
+    if r.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !r.status().is_success() {
+        return Err(());
+    }
+    r.body_mut().read_to_vec().map(Some).map_err(|_| ())
+}
+
+fn icon_dir(kind: &str) -> std::path::PathBuf {
+    beayy_core::default_root().join("icons").join("lol").join(kind)
+}
+
+/// 装备、召唤师技能：编号 → 图片地址的表（CommunityDragon 的清单），存一份，7 天一换
+fn icon_paths(ag: &ureq::Agent, kind: &str) -> HashMap<i64, String> {
+    let file = icon_dir(kind).join("paths.json");
+    let fresh = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|e| e.as_secs() < 7 * 86400);
+    if !fresh {
+        let list = if kind == "item" { "items" } else { "summoner-spells" };
+        if let Ok(Some(b)) = fetch(ag, &format!("{CDRAGON}/v1/{list}.json")) {
+            if let Ok(Value::Array(a)) = serde_json::from_slice::<Value>(&b) {
+                let m: Map<String, Value> = a.iter().filter_map(|x| Some((x["id"].as_i64()?.to_string(), json!(x["iconPath"].as_str()?)))).collect();
+                let _ = std::fs::create_dir_all(icon_dir(kind));
+                let _ = std::fs::write(&file, serde_json::to_vec(&m).unwrap_or_default());
+            }
+        }
+    }
+    let m: Map<String, Value> = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    m.into_iter().filter_map(|(k, v)| Some((k.parse().ok()?, v.as_str()?.to_string()))).collect()
+}
+
+fn icon_url(kind: &str, id: i64, paths: &HashMap<i64, String>) -> Option<String> {
+    if kind == "champ" {
+        return Some(format!("{CDRAGON}/v1/champion-icons/{id}.png"));
+    }
+    let p = paths.get(&id)?;
+    Some(format!("{CDRAGON}/{}", p.trim_start_matches("/lol-game-data/assets/").to_lowercase()))
+}
+
+fn one_icon(ag: &ureq::Agent, kind: &str, id: i64, paths: &HashMap<i64, String>) -> Value {
+    let d = icon_dir(kind);
+    let (png, none) = (d.join(format!("{id}.png")), d.join(format!("{id}.none")));
+    if let Ok(b) = std::fs::read(&png) {
+        return json!(crate::icons::data_url(&b));
+    }
+    if none.exists() {
+        return Value::Null;
+    }
+    let Some(url) = icon_url(kind, id, paths) else { return Value::Null };
+    let _ = std::fs::create_dir_all(&d);
+    match fetch(ag, &url) {
+        Ok(Some(b)) => {
+            let _ = std::fs::write(&png, &b);
+            json!(crate::icons::data_url(&b))
+        }
+        Ok(None) => {
+            let _ = std::fs::write(&none, "");
+            Value::Null
+        }
+        Err(()) => Value::Null,
+    }
+}
+
+/// 一批图标：kind＝champ（英雄）／item（装备）／spell（召唤师技能），{编号: data URL 或 null}。没缓存的联网取，之后都走缓存
+#[cfg_attr(not(beayy_mobile), tauri::command(async))]
+pub fn game_icons(kind: String, ids: Vec<i64>) -> Map<String, Value> {
+    if !["champ", "item", "spell"].contains(&kind.as_str()) {
+        return Map::new();
+    }
+    let mut ids: Vec<i64> = ids.into_iter().filter(|i| *i > 0).collect();
+    ids.sort();
+    ids.dedup();
+    ids.truncate(300);
+    let ag = icon_agent();
+    let paths = if kind == "champ" { HashMap::new() } else { icon_paths(&ag, &kind) };
+    let out: Vec<(String, Value)> = std::thread::scope(|s| {
+        ids.chunks(ids.len().div_ceil(8).max(1))
+            .map(|c| s.spawn(|| c.iter().map(|id| (id.to_string(), one_icon(&ag, &kind, *id, &paths))).collect::<Vec<_>>()))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+    out.into_iter().collect()
 }

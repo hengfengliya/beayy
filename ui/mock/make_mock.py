@@ -935,7 +935,8 @@ def make_games():
             others = r.sample([c for c in champs if c != champ], 9)
             team_ids = [100] * 5 + [200] * 5
             parts, idents = [], []
-            pl = r.sample(names, 9)
+            pl = r.sample([x for x in names if x not in ("北岛来信", "橘子汽水")], 9)
+            duo = r.random() < 0.6
             for i in range(10):
                 c = champ if i == 0 else others[i - 1]
                 w = win if team_ids[i] == 100 else not win
@@ -946,7 +947,9 @@ def make_games():
                               "stats": {"win": w, "kills": k, "deaths": dd, "assists": a, "champLevel": r.randint(12, 18), "totalMinionsKilled": r.randint(20, 230) if q != 450 else r.randint(20, 80),
                                         "neutralMinionsKilled": r.randint(0, 30), "totalDamageDealtToChampions": r.randint(9000, 42000) * (2 if q == 450 else 1), "goldEarned": r.randint(7000, 17000), "visionScore": r.randint(5, 60) if q != 450 else 0},
                               "timeline": {"lane": "MIDDLE" if i == 0 else "NONE", "role": "SOLO"}})
-                pi = me if i == 0 else {"puuid": f"demo-{i}", "gameName": pl[i - 1], "tagLine": f"{r.randint(10000, 99999)}"}
+                # 两个固定的朋友六成的局在同队（游戏页「常一起玩的」），别的人每局换
+                friend = {1: ("demo-f1", "北岛来信", "20481"), 2: ("demo-f2", "橘子汽水", "31337")}.get(i) if duo else None
+                pi = me if i == 0 else {"puuid": friend[0], "gameName": friend[1], "tagLine": friend[2]} if friend else {"puuid": f"demo-{gid}-{i}", "gameName": pl[i - 1], "tagLine": f"{r.randint(10000, 99999)}"}
                 idents.append({"participantId": i + 1, "player": {**pi, "platformId": "HN1", "summonerName": ""}})
             mp0 = parts[0]["stats"]
             team_kills = sum(p["stats"]["kills"] for p in parts if p["teamId"] == 100)

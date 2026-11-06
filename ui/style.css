@@ -14,17 +14,18 @@
   --rec-computer: #2a78d6; --rec-phone: #fab219; --rec-night: #d03b3b; --rec-track: #efefed;
   --rec-watch: #26a269; --rec-place: #dededb; --rec-place-alt: #cbcac6;
   --rec-go: #cbcac6;
+  --gm-win: #2a78d6; --gm-loss: #d03b3b; --gm-gold: #a8700d; --gm-silver: #6f747c;
   --pl-1: #dcd5f6; --pl-2: #f4d5de; --pl-3: #cfe8ea; --pl-4: #f3d9cc; --pl-5: #e7ddd2; --pl-6: #e2e8c8;
   --pl-1-s: #8a7dd6; --pl-2-s: #c25e7d; --pl-3-s: #3a8c92; --pl-4-s: #c26d4a; --pl-5-s: #94806a; --pl-6-s: #7a873a; --rec-go-s: #8b8a85;
   --crayon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 24' preserveAspectRatio='none'%3E%3Cfilter id='c' x='-2%25' y='-40%25' width='104%25' height='180%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9 0.3' numOctaves='2' seed='7' result='n'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='n' scale='4' result='d'/%3E%3CfeColorMatrix in='n' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.8 2.1' result='g'/%3E%3CfeComposite in='d' in2='g' operator='in'/%3E%3C/filter%3E%3Cpath filter='url%28%23c%29' fill='%238fb5a4' fill-opacity='0.6' d='M2 9C40 7.6 90 7.2 140 7.8S210 8.4 238 7.6v14.4C200 23.2 150 22.4 100 22.8S30 23.4 2 22.2z'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --rec-computer: #4a90e8; --rec-phone: #f5b532; --rec-night: #f06a6a; --rec-track: #262626; --rec-watch: #3ec07f; --rec-place: #3a3a39; --rec-place-alt: #4b4b49;
+  :root:not([data-theme="light"]) { --gm-win: #5a9cf0; --gm-loss: #f06a6a; --gm-gold: #e0a43a; --gm-silver: #a8adb5; --rec-computer: #4a90e8; --rec-phone: #f5b532; --rec-night: #f06a6a; --rec-track: #262626; --rec-watch: #3ec07f; --rec-place: #3a3a39; --rec-place-alt: #4b4b49;
     --rec-go: #4b4b49; --pl-1: #3f3868; --pl-2: #5c3444; --pl-3: #285152; --pl-4: #5e3e30; --pl-5: #4d4238; --pl-6: #46502c;
     --pl-1-s: #8a80d0; --pl-2-s: #c9708a; --pl-3-s: #4f9ea3; --pl-4-s: #c97d5c; --pl-5-s: #9e8b76; --pl-6-s: #8f9b4e; --rec-go-s: #7a7973;
     --crayon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 24' preserveAspectRatio='none'%3E%3Cfilter id='c' x='-2%25' y='-40%25' width='104%25' height='180%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9 0.3' numOctaves='2' seed='7' result='n'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='n' scale='4' result='d'/%3E%3CfeColorMatrix in='n' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.8 2.1' result='g'/%3E%3CfeComposite in='d' in2='g' operator='in'/%3E%3C/filter%3E%3Cpath filter='url%28%23c%29' fill='%238fb5a4' fill-opacity='0.45' d='M2 9C40 7.6 90 7.2 140 7.8S210 8.4 238 7.6v14.4C200 23.2 150 22.4 100 22.8S30 23.4 2 22.2z'/%3E%3C/svg%3E"); }
 }
-:root[data-theme="dark"] { --rec-computer: #4a90e8; --rec-phone: #f5b532; --rec-night: #f06a6a; --rec-track: #262626; --rec-watch: #3ec07f; --rec-place: #3a3a39; --rec-place-alt: #4b4b49;
+:root[data-theme="dark"] { --gm-win: #5a9cf0; --gm-loss: #f06a6a; --gm-gold: #e0a43a; --gm-silver: #a8adb5; --rec-computer: #4a90e8; --rec-phone: #f5b532; --rec-night: #f06a6a; --rec-track: #262626; --rec-watch: #3ec07f; --rec-place: #3a3a39; --rec-place-alt: #4b4b49;
   --rec-go: #4b4b49; --pl-1: #3f3868; --pl-2: #5c3444; --pl-3: #285152; --pl-4: #5e3e30; --pl-5: #4d4238; --pl-6: #46502c;
     --pl-1-s: #8a80d0; --pl-2-s: #c9708a; --pl-3-s: #4f9ea3; --pl-4-s: #c97d5c; --pl-5-s: #9e8b76; --pl-6-s: #8f9b4e; --rec-go-s: #7a7973;
   --crayon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 24' preserveAspectRatio='none'%3E%3Cfilter id='c' x='-2%25' y='-40%25' width='104%25' height='180%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9 0.3' numOctaves='2' seed='7' result='n'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='n' scale='4' result='d'/%3E%3CfeColorMatrix in='n' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.8 2.1' result='g'/%3E%3CfeComposite in='d' in2='g' operator='in'/%3E%3C/filter%3E%3Cpath filter='url%28%23c%29' fill='%238fb5a4' fill-opacity='0.45' d='M2 9C40 7.6 90 7.2 140 7.8S210 8.4 238 7.6v14.4C200 23.2 150 22.4 100 22.8S30 23.4 2 22.2z'/%3E%3C/svg%3E"); }
@@ -350,6 +351,74 @@ button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-m
 .bill-meta { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); user-select: text; }
 @media (max-width: 1099px) { #bill-body .readouts .v { font-size: 24px; } .mx-table.bills .b-method, .mx-table.bills td:nth-child(5) { display: none; } .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child) { width: 96px; } .mx-table.bills-who .b-time { width: 56px; } .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 88px; } .bill-budget { grid-template-columns: minmax(0, 1fr) 120px; } .bill-budget .bill-bar { display: none; } }
 @media (max-width: 759px) { .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child), .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 72px; } .mx-table.bills .b-time { width: 88px; } .mx-table.bills .b-amt { width: 96px; } .mx-table.bills th:nth-child(3), .mx-table.bills td:nth-child(3), .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(6) { display: none; } .mx-table.bill-imports .b-range, .mx-table.bill-imports td:nth-child(2), .mx-table.bill-imports .b-at, .mx-table.bill-imports td:nth-child(6) { display: none; } .mx-table.bills-ct .b-bar, .mx-table.bills-ct td:nth-child(2) { display: none; } .mn-donut { grid-template-columns: 1fr; justify-items: center; } .mn-dl { width: 100%; } .mn-days .mn-col:not(.is-tick) .mn-l { visibility: hidden; } .mn-cols { gap: 4px; } .mn-days { gap: 1px; } }
+/* 游戏：胜负色是设计系统登记的例外（照英雄联盟客户端，胜蓝负红，只用在对局行的色条和底、结果字、弹层两队的标题）；
+   MVP 金、SVP 银只用在徽章。英雄、装备、技能图标来自 CommunityDragon（games.rs 的 game_icons），没取到时是写着首字的灰方块 */
+.gm-ic { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 4px; overflow: hidden; background: var(--rec-track); color: var(--ink-3); font-size: 11px; line-height: 1; object-fit: cover; }
+.gm-ic--lg { width: 36px; height: 36px; border-radius: 8px; font-size: 15px; }
+.gm-ic--sm { width: 20px; height: 20px; }
+.gm-ic--spell { width: 16px; height: 16px; border-radius: 3px; }
+.gm-ic.is-empty { background: color-mix(in srgb, var(--rec-track) 55%, transparent); }
+.gm-cell { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.gm-cell > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.gm-cell > .mx-ico { width: 16px; height: 16px; color: var(--ink-3); }
+.gm-tag { margin-left: 1px; font-size: 12px; color: var(--ink-4); }
+.gm-pick { display: flex; align-items: center; gap: 3px; }
+.gm-sp { display: flex; flex-direction: column; gap: 3px; }
+.gm-items { display: flex; align-items: center; gap: 2px; }
+.gm-items .gm-ic { width: 22px; height: 22px; }
+.gm-items .is-trinket { margin-left: 4px; border-radius: 50%; }
+.gm-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gm-badge { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px 0 5px; border-radius: 10px; background: var(--hover); color: var(--ink-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.gm-badge .mx-ico { width: 12px; height: 12px; }
+.gm-badge--mvp { background: color-mix(in srgb, var(--gm-gold) 16%, var(--page)); color: var(--gm-gold); }
+.gm-badge--svp { background: color-mix(in srgb, var(--gm-silver) 16%, var(--page)); color: var(--gm-silver); }
+.gm-badge--penta .mx-ico, .gm-badge--quadra .mx-ico, .gm-badge--triple .mx-ico, .gm-badge--fb .mx-ico { color: var(--gm-loss); }
+.gm-badge--penta { background: color-mix(in srgb, var(--gm-loss) 14%, var(--page)); color: var(--gm-loss); }
+.gm-lp { padding: 0 2px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 对局：每局一行，左边色条＋淡底表示胜负 */
+.gm-games { display: grid; gap: 6px; }
+.gm-row { position: relative; display: grid; grid-template-columns: 52px 60px minmax(96px, 1.1fr) 84px minmax(112px, 1fr) 182px minmax(0, 0.9fr); align-items: center; gap: var(--space-3); width: 100%; padding: 8px 12px 8px 16px; border: 0; border-radius: var(--radius-md); background: var(--gm-wash, var(--hover)); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gm-row::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--gm-c, var(--line)); }
+.gm-row.is-win { --gm-c: var(--gm-win); --gm-wash: color-mix(in srgb, var(--gm-win) 7%, var(--page)); }
+.gm-row.is-loss { --gm-c: var(--gm-loss); --gm-wash: color-mix(in srgb, var(--gm-loss) 7%, var(--page)); }
+.gm-row.is-remake { color: var(--ink-3); }
+.gm-row.is-win:hover { --gm-wash: color-mix(in srgb, var(--gm-win) 12%, var(--page)); }
+.gm-row.is-loss:hover { --gm-wash: color-mix(in srgb, var(--gm-loss) 12%, var(--page)); }
+.gm-row > span { min-width: 0; }
+.gm-res, .gm-what, .gm-kda, .gm-dmg { display: flex; flex-direction: column; line-height: 18px; }
+.gm-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.gm-row small, .gm-pl small { overflow: hidden; font-size: 12px; color: var(--ink-3); text-overflow: ellipsis; white-space: nowrap; }
+.gm-res b { color: var(--gm-c, var(--ink-3)); }
+.gm-what b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-row .gm-badges { justify-content: flex-end; }
+/* 一局的弹层：两队，每人一行 */
+.mx-dialog.gm-dlg { width: min(920px, 100%); }
+.gm-team { margin-top: var(--space-5); }
+.gm-team.is-win { --gm-c: var(--gm-win); }
+.gm-team.is-loss { --gm-c: var(--gm-loss); }
+.gm-team h3 { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-2); padding-left: 10px; border-left: 3px solid var(--gm-c); font-size: 13px; line-height: 20px; }
+.gm-team h3 b { color: var(--gm-c); font-weight: 600; }
+.gm-team h3 span { color: var(--ink-3); font-size: 12px; font-weight: 400; }
+.gm-pl { display: grid; grid-template-columns: 58px minmax(0, 1.5fr) 80px minmax(96px, 1fr) 60px 44px 178px; align-items: center; gap: var(--space-3); padding: 6px 8px; border-radius: var(--radius-sm); font-size: 13px; }
+.gm-pl + .gm-pl { border-top: 1px solid var(--line-2); }
+.gm-pl.is-me { background: color-mix(in srgb, var(--gm-c) 8%, var(--surface)); }
+.gm-pl-head { padding-top: 0; padding-bottom: 4px; color: var(--ink-4); font-size: 12px; }
+.gm-pl-head > span { display: inline-flex; align-items: center; gap: 3px; }
+.gm-pl-head .mx-ico { width: 13px; height: 13px; }
+.gm-pl .is-num { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+.gm-pwho { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gm-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-pl.is-me .gm-nm { font-weight: 600; }
+.gm-pl .gm-kda { align-items: flex-end; line-height: 17px; }
+.gm-pl .gm-kda b { font-weight: 600; }
+.gm-dbar { display: flex; flex-direction: column; gap: 4px; font-variant-numeric: tabular-nums; }
+.gm-dbar b { font-weight: 500; }
+.gm-dbar i { display: block; height: 4px; border-radius: 2px; background: var(--gm-c, var(--ink-3)); opacity: 0.7; }
+.gm-bans { display: flex; align-items: center; gap: 4px; margin: 6px 0 0 10px; color: var(--ink-4); font-size: 12px; }
+.gm-bans span { margin-right: 4px; }
+.gm-bans .gm-ic { filter: grayscale(1); opacity: 0.75; }
+/* 设置里总开关下面的分项（功能 → 游戏下面每款游戏）：往里缩一格 */
+.set-sub .mx-setting { padding-left: var(--space-6); }
 /* 侧栏入口按条件藏起来（游戏关着、手机上的收支）：设计系统给 a 写了 display，盖过了 hidden */
 .mx-nav a[hidden] { display: none; }
 /* 游戏页：账号写在页头右边；读数五个一排；每天的柱沿用收支的 mn-days；什么时候玩（一天一行、24 小时横轴，时刻等宽）；对局表；一局的弹层 */
@@ -377,17 +446,11 @@ button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-m
 .mx-table.gm-games .g-res { width: 32px; }
 .mx-table.gm-games th.is-num { width: 64px; }
 .mx-table.gm-games th.is-num:nth-child(6) { width: 88px; }
-.mx-table.gm-players th.is-num { width: 64px; }
-.mx-table.gm-players th.is-num:last-child { width: 40px; }
 .mx-table.gm-games tr.is-remake td { color: var(--ink-4); }
 .gm-sub { margin-left: 6px; font-size: 12px; color: var(--ink-4); }
-.mx-dialog.gm-dlg { width: min(720px, 100%); }
 .gm-dlg .mx-dialog-body > * { flex: none; }
 .gm-facts { margin-bottom: var(--space-2); }
-.gm-team { margin: var(--space-5) 0 var(--space-2); font-size: 13px; line-height: 20px; font-weight: 600; }
-.mx-table.gm-players tr.is-me td { font-weight: 600; }
-.gm-bans { margin: var(--space-2) 0 0; font-size: 12px; color: var(--ink-4); }
-@media (max-width: 759px) { #gm-body .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gm-tl-row { grid-template-columns: 76px minmax(0, 1fr); } .mx-table.gm-games th:nth-child(2), .mx-table.gm-games td:nth-child(2), .mx-table.gm-games th:nth-child(7), .mx-table.gm-games td:nth-child(7) { display: none; } .mx-table.gm-players th:nth-child(5), .mx-table.gm-players td:nth-child(5), .mx-table.gm-players th:nth-child(6), .mx-table.gm-players td:nth-child(6) { display: none; } }
+@media (max-width: 759px) { #gm-body .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gm-tl-row { grid-template-columns: 76px minmax(0, 1fr); } .gm-row { grid-template-columns: 44px 48px minmax(0, 1fr) 76px; } .gm-row .gm-dmg, .gm-row .gm-items, .gm-row .gm-badges { display: none; } .gm-pl { grid-template-columns: 48px minmax(0, 1fr) 76px 80px; } .gm-pl > :nth-child(n+5) { display: none; } }
 /* 设置「数据」页的表 */
 .mx-table.store th:last-child { width: 32%; }
 .mx-table.store .num { width: 15%; text-align: right; }
