@@ -98,6 +98,7 @@ async function callRaw(cmd, args = {}) {
       for (const p of Object.values(await loadMock("get_bills"))) { const b = p.items.find((x) => x.id === args.id); if (b) return { raw: {}, remembered: false, ...b }; }
       return null;
     }
+    case "get_game": { const all = await loadMock("get_game").catch(() => ({})); return all[args.id] || null; }
     case "pick_bill_files": return [];
     case "set_bill_class": case "rebuild_bills": console.info(`样例模式：${cmd}`, args); return null;
     case "classify_bills_ai": return { asked: 0, done: 0, error: null };
@@ -880,6 +881,9 @@ function renderSide() {
   // 账单只在电脑上导入、存在电脑上，手机版没有收支页
   const money = document.querySelector('#nav [data-page="money"]');
   if (money) money.hidden = !!st.mobile;
+  // 游戏是可选功能（设置 → 功能，默认关），开了才出现；手机版不放
+  const games = document.querySelector('#nav [data-page="games"]');
+  if (games) games.hidden = !!st.mobile || !(S.settings && S.settings.games);
   if (dot) { dot.hidden = !bad; dot.title = st.paused ? tr("已暂停") : tr("没在记录或缺权限"); }
   const pf = S.profile || { name: tr("我") };
   const av = document.getElementById("me-avatar");
@@ -2353,6 +2357,194 @@ async function renderMoney(arg) {
   };
 }
 
+// ---------- 游戏：英雄联盟（Windows 上 crates/beayy-games 记的，src-tauri/src/games.rs 汇总；方案 报告/方案_20261106_英雄联盟接入.md） ----------
+
+const GM = { game: "lol", tab: "overview", range: "30", data: null };
+/** 支持的游戏（id → 名字）；以后加 Steam 等在这里和 games.rs 各加一项 */
+const GM_GAMES = { lol: "英雄联盟" };
+const GM_TIER = { IRON: "黑铁", BRONZE: "黄铜", SILVER: "白银", GOLD: "黄金", PLATINUM: "铂金", EMERALD: "翡翠", DIAMOND: "钻石", MASTER: "大师", GRANDMASTER: "宗师", CHALLENGER: "王者" };
+const GM_QUEUE = { RANKED_SOLO_5x5: "单双排", RANKED_FLEX_SR: "灵活排位", RANKED_TFT: "云顶之弈", RANKED_TFT_DOUBLE_UP: "云顶双人" };
+const GM_REGION = { HN1: "艾欧尼亚", HN10: "黑色玫瑰", BGP2: "峡谷之巅" };
+const gmNum = (n) => Math.round(n || 0).toLocaleString("en-US");
+const gmKda = (m) => `${m.k}/${m.d}/${m.a}`;
+const gmRatio = (k, d, a) => ((k + a) / Math.max(d, 1)).toFixed(1);
+const gmTier = (q) => (!q || !q.tier ? "—" : tr(GM_TIER[q.tier] || q.tier) + (["MASTER", "GRANDMASTER", "CHALLENGER"].includes(q.tier) || !q.division || q.division === "NA" ? "" : " " + q.division));
+const gmResult = (m) => (m.remake ? tr("重开") : m.win === true ? tr("胜") : m.win === false ? tr("负") : "—");
+const gmDay = (date) => (LANG === "zh" ? `${+date.slice(5, 7)} 月 ${+date.slice(8)} 日 ${weekday(date)}` : `${toDate(date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${weekday(date)}`);
+const gmDayOf = (iso) => localDay(new Date(iso));
+const gmLp = (r) => (!r ? "" : r.lp != null ? (r.lp > 0 ? `+${r.lp}` : r.lp < 0 ? `−${-r.lp}` : "0") : `→ ${gmTier(r.to)}`);
+const gmCounted = (ms) => ms.filter((m) => !m.remake && typeof m.win === "boolean");
+
+/** 选的这段时间里的局和天（近 7 天、近 30 天按本地日算，含今天） */
+function gmView() {
+  const d = GM.data;
+  const cut = GM.range === "all" ? "" : localDay(new Date(Date.now() - (+GM.range - 1) * 86400000));
+  return { cut, matches: d.matches.filter((m) => !cut || gmDayOf(m.start) >= cut), days: d.days.filter((x) => !cut || x.date >= cut) };
+}
+
+function gmChamps(ms) {
+  const by = new Map();
+  for (const m of gmCounted(ms)) {
+    const c = by.get(m.champ_id) || { id: m.champ_id, name: m.champ, n: 0, w: 0, k: 0, d: 0, a: 0, dmg: 0, dur: 0, last: m.start };
+    c.n++; c.w += m.win ? 1 : 0; c.k += m.k; c.d += m.d; c.a += m.a; c.dmg += m.dmg; c.dur += m.dur;
+    if (m.start > c.last) c.last = m.start;
+    by.set(m.champ_id, c);
+  }
+  return [...by.values()].sort((a, b) => b.n - a.n || b.w - a.w);
+}
+
+/** 一局里落在 23:00–5:00 的秒数（按开局那天的本地时间算） */
+function gmNightSec(g) {
+  const t = new Date(g.start), s = t.getHours() * 60 + t.getMinutes() + t.getSeconds() / 60, e = s + g.dur / 60;
+  const ov = (a, b) => Math.max(0, Math.min(e, b) - Math.max(s, a));
+  return (ov(0, 300) + ov(1380, 1740)) * 60;
+}
+
+/** 每天打了多久：一天一根柱，深夜那段用越界色 */
+function gmDayChart(days, cut) {
+  const by = Object.fromEntries(days.map((x) => [x.date, x]));
+  const today = localDay(), first = cut || (days.length ? days[days.length - 1].date : today);
+  const dates = [];
+  for (let t = toDate(first); localDay(t) <= today; t.setDate(t.getDate() + 1)) dates.push(localDay(t));
+  const max = Math.max(3600, ...dates.map((x) => (by[x] || {}).play || 0));
+  const every = dates.length > 14 ? 5 : 1;
+  const cols = dates.map((x, i) => {
+    const d = by[x], play = d ? d.play : 0, night = d ? Math.min(play, d.games.reduce((s, g) => s + gmNightSec(g), 0)) : 0;
+    const tip = d ? [gmDay(x), tr("{n} 局", { n: d.n + d.remakes }), d.n ? tr("{w} 胜 {l} 负", { w: d.w, l: d.n - d.w }) : "", tr("打了 {t}", { t: durText(play) }), night ? tr("深夜 {t}", { t: durText(night) }) : ""].filter(Boolean).join("\n") : gmDay(x);
+    // 柱子从下往上画：先是 23:00 以前的，深夜那段在上面
+    const segs = (play - night > 0 ? `<i style="height:${((play - night) / max * 100).toFixed(2)}%;background:var(--rec-computer)"></i>` : "") + (night ? `<i style="height:${(night / max * 100).toFixed(2)}%;background:var(--rec-night)"></i>` : "");
+    const tick = i % every === 0 || x === today;
+    return `<button class="mn-col${tick ? " is-tick" : ""}" data-gday="${x}"${d ? "" : " disabled"} title="${esc(tip)}"><span class="mn-stack">${segs}</span><span class="mn-l">${tick ? +x.slice(8) : ""}</span></button>`;
+  }).join("");
+  return `<div class="mn-cols mn-days">${cols}</div><div class="legend mn-legend"><span><i style="background:var(--rec-computer)"></i>${tr("对局")}</span><span><i style="background:var(--rec-night)"></i>${tr("23:00 以后")}</span></div>`;
+}
+
+/** 什么时候玩：一天一行、横轴 24 小时，每局按开局和时长画一段 */
+function gmTimeline(days) {
+  const rows = days.filter((x) => x.games.length).slice(0, 14).map((x) => {
+    const blocks = x.games.map((g) => {
+      const t = new Date(g.start), s = (t.getHours() * 60 + t.getMinutes()) / 1440, w = Math.min(1 - s, g.dur / 86400);
+      return `<i class="${gmNightSec(g) > g.dur / 2 ? "is-night" : ""}" style="left:${(s * 100).toFixed(2)}%;width:${(w * 100).toFixed(2)}%" title="${esc(`${hm(g.start)} · ${durText(g.dur)} · ${gmResult(g)}`)}"></i>`;
+    }).join("");
+    return `<div class="gm-tl-row"><span class="gm-tl-d">${esc(gmDay(x.date))}</span><span class="gm-tl-track">${blocks}</span></div>`;
+  }).join("");
+  const axis = [0, 6, 12, 18, 24].map((h) => `<span style="left:${(h / 24 * 100).toFixed(2)}%">${pad2(h)}:00</span>`).join("");
+  return `<div class="gm-tl">${rows}<div class="gm-tl-row gm-tl-axis"><span class="gm-tl-d"></span><span class="gm-tl-ticks">${axis}</span></div></div>`;
+}
+
+function gmRankTable(rank) {
+  const qs = (rank && rank.queues) || [];
+  if (!qs.length) return "";
+  return section(tr("段位"), `<div class="mx-table-wrap"><table class="mx-table gm-t"><thead><tr><th>${tr("队列")}</th><th>${tr("段位")}</th><th class="is-num">${tr("胜点")}</th><th class="is-num">${tr("胜")}</th><th class="is-num">${tr("负")}</th><th class="is-num">${tr("胜率")}</th></tr></thead><tbody>
+    ${qs.map((q) => `<tr><td>${esc(tr(GM_QUEUE[q.queue] || q.queue))}</td><td>${esc(gmTier(q))}</td><td class="is-num">${q.lp}</td><td class="is-num">${q.wins}</td><td class="is-num">${q.losses}</td><td class="is-num">${q.wins + q.losses ? sharePct(q.wins / (q.wins + q.losses)) : "—"}</td></tr>`).join("")}</tbody></table></div>`,
+    { aside: esc(tr("{t} 更新", { t: `${gmDayOf(rank.at).slice(5)} ${hm(rank.at)}` })) });
+}
+
+function gmChampTable(cs, cls = "") {
+  return `<div class="mx-table-wrap"><table class="mx-table gm-t gm-champs ${cls}"><thead><tr><th>${tr("英雄")}</th><th class="is-num g-n">${tr("局数")}</th><th class="is-num g-n">${tr("胜率")}</th><th class="is-num g-kda">${tr("场均 K/D/A")}</th><th class="is-num g-n">KDA</th><th class="is-num g-dmg">${tr("场均伤害")}</th><th class="is-num g-dur">${tr("场均时长")}</th><th class="is-num g-n">${tr("最近")}</th></tr></thead><tbody>
+    ${cs.map((c) => `<tr data-gchamp="${c.id}"><td>${esc(c.name || `#${c.id}`)}</td><td class="is-num">${c.n}</td><td class="is-num">${sharePct(c.w / c.n)}</td><td class="is-num">${[c.k, c.d, c.a].map((v) => (v / c.n).toFixed(1)).join("/")}</td><td class="is-num">${gmRatio(c.k, c.d, c.a)}</td><td class="is-num">${gmNum(c.dmg / c.n)}</td><td class="is-num">${durText(c.dur / c.n)}</td><td class="is-num">${gmDayOf(c.last).slice(5)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function gmOverview(v) {
+  const ms = gmCounted(v.matches), w = ms.filter((m) => m.win).length, remakes = v.matches.filter((m) => m.remake).length;
+  const play = v.days.reduce((s, x) => s + x.play, 0), wait = v.days.reduce((s, x) => s + x.wait, 0);
+  const night = v.matches.filter((m) => m.night).length;
+  const ro = `<div class="readouts">
+      ${readout(tr("局数"), ms.length, "", "", false, [tr("{w} 胜 {l} 负", { w, l: ms.length - w }), remakes ? tr("另有 {n} 局重开", { n: remakes }) : ""].filter(Boolean).join("\n"))}
+      ${readout(tr("胜率"), ms.length ? Math.round(w / ms.length * 100) : "—", "%")}
+      ${readout(tr("在打"), hh(play), tr("小时"), "", false, durText(play))}
+      ${readout(tr("等待"), wait ? hh(wait) : "—", tr("小时"), "", false, tr("排队、选人、读条"))}
+      ${readout(tr("深夜局"), night, tr("局"), "", night > 0, tr("23:00 到 5:00 开的局"))}
+    </div>`;
+  const champs = gmChamps(v.matches).slice(0, 5);
+  return ro + `<div class="secs-plain" style="margin-top:var(--space-6)">
+    ${section(tr("每天"), gmDayChart(v.days, v.cut))}
+    ${v.days.some((x) => x.games.length) ? section(tr("什么时候玩"), gmTimeline(v.days)) : ""}
+    ${champs.length ? section(tr("常玩英雄"), gmChampTable(champs)) : ""}
+    ${gmRankTable(GM.data.rank)}</div>`;
+}
+
+function gmList(v) {
+  if (!v.matches.length) return emptyInline(tr("这段时间没打"));
+  const ranked = v.matches.some((m) => m.rank);
+  const groups = [];
+  for (const m of v.matches) { const d = gmDayOf(m.start); if (!groups.length || groups[groups.length - 1][0] !== d) groups.push([d, []]); groups[groups.length - 1][1].push(m); }
+  return `<div class="secs-plain">${groups.map(([d, ms]) => {
+    const c = gmCounted(ms), w = c.filter((m) => m.win).length;
+    return `<div id="gm-d-${d}">${section(gmDay(d), `<div class="mx-table-wrap"><table class="mx-table gm-t gm-games"><thead><tr><th class="g-time">${tr("时间")}</th><th>${tr("模式")}</th><th>${tr("英雄")}</th><th class="g-res">${tr("结果")}</th><th class="is-num">K/D/A</th><th class="is-num">${tr("伤害")}</th><th class="is-num">${tr("时长")}</th>${ranked ? `<th class="is-num">${tr("胜点")}</th>` : ""}</tr></thead><tbody>
+      ${ms.map((m) => `<tr data-game="${m.id}"${m.remake ? ' class="is-remake"' : ""}><td class="mx-num">${hm(m.start)}</td><td>${esc(m.queue || "")}</td><td>${esc(m.champ || `#${m.champ_id}`)}</td><td>${gmResult(m)}</td><td class="is-num">${gmKda(m)}</td><td class="is-num">${gmNum(m.dmg)}${m.dmg_share != null ? `<small class="gm-sub">${sharePct(m.dmg_share)}</small>` : ""}</td><td class="is-num">${durText(m.dur)}</td>${ranked ? `<td class="is-num">${esc(gmLp(m.rank))}</td>` : ""}</tr>`).join("")}</tbody></table></div>`,
+      { aside: esc([tr("{n} 局", { n: ms.length }), c.length ? tr("{w} 胜 {l} 负", { w, l: c.length - w }) : ""].filter(Boolean).join(" · ")) })}</div>`;
+  }).join("")}</div>`;
+}
+
+function gmChampsBody(v) {
+  const cs = gmChamps(v.matches);
+  return cs.length ? gmChampTable(cs) : emptyInline(tr("这段时间没打"));
+}
+
+function drawGames() {
+  const body = document.getElementById("gm-body"); if (!body || !GM.data) return;
+  const v = gmView();
+  body.innerHTML = GM.tab === "list" ? gmList(v) : GM.tab === "champs" ? gmChampsBody(v) : gmOverview(v);
+}
+
+async function renderGames(arg) {
+  const tk = RT.seq;
+  if (!S.settings.games) {
+    $app.innerHTML = header(tr("游戏")) + `<div class="reading">${emptyBlock("day", tr("游戏记录没开"), `<div class="empty-acts"><button class="mx-btn mx-btn--primary" id="gm-enable">${tr("去设置里打开")}</button></div>`)}</div>`;
+    document.getElementById("gm-enable").onclick = () => { SS.tab = "features"; location.hash = "#/settings"; };
+    return;
+  }
+  if (arg && GM_GAMES[arg]) GM.game = arg;
+  const d = await call("games_overview", { game: GM.game });
+  if (stale(tk)) return;
+  GM.data = d;
+  const list = (d.games || []).map((g) => g.id);
+  const pick = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="gm-game" aria-haspopup="menu" aria-expanded="false">${esc(tr(GM_GAMES[GM.game]))}${ICON.chevD}</button>
+      <div class="mx-menu" role="menu" hidden>${Object.keys(GM_GAMES).filter((k) => list.includes(k) || k === GM.game).map((k) => `<button role="menuitemradio" aria-checked="${k === GM.game}" data-ggame="${k}">${esc(tr(GM_GAMES[k]))}${k === GM.game ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
+  if (!d.matches.length) {
+    $app.innerHTML = header(tr("游戏"), pick) + `<div class="reading">${emptyBlock("day", tr("在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里"))}</div>`;
+    bindPick(document.getElementById("gm-game"));
+    return;
+  }
+  const a = d.account;
+  const who = a ? [`${a.name}${a.tag ? "#" + a.tag : ""}`, a.platform ? tr(GM_REGION[a.platform] || a.platform) : ""].filter(Boolean).join(" · ") : "";
+  const tabs = `<div class="tabs" role="tablist">${[["overview", tr("概览")], ["list", tr("对局")], ["champs", tr("英雄")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.tab}" class="${k === GM.tab ? "is-on" : ""}" data-gtab="${k}">${v}</button>`).join("")}</div>`;
+  const seg = `<div class="mx-seg" role="tablist">${[["7", tr("近 7 天")], ["30", tr("近 30 天")], ["all", tr("全部")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.range}" class="${k === GM.range ? "is-on" : ""}" data-grange="${k}">${v}</button>`).join("")}</div>`;
+  $app.innerHTML = header(tr("游戏"), (who ? `<span class="gm-who" title="${esc(a.level ? tr("{n} 级", { n: a.level }) : "")}">${esc(who)}</span>` : "") + pick) + `<div id="games"><div class="toolbar"><div class="toolbar-left">${tabs}<span class="tb-sep"></span>${seg}</div></div><div class="reading" id="gm-body"></div></div>`;
+  drawGames();
+  bindPick(document.getElementById("gm-game"));
+  document.getElementById("gm-game").parentElement.onclick = (e) => { const x = e.target.closest("[data-ggame]"); if (x) location.hash = `#/games/${x.dataset.ggame}`; };
+  document.getElementById("games").onclick = (e) => {
+    const at = (sel) => e.target.closest(sel);
+    let x;
+    if ((x = at("[data-gtab]"))) { GM.tab = x.dataset.gtab; return renderGames(); }
+    if ((x = at("[data-grange]"))) { GM.range = x.dataset.grange; return renderGames(); }
+    if ((x = at("[data-game]"))) return gmGameDialog(+x.dataset.game);
+    if (at("[data-gchamp]")) { if (GM.tab !== "champs") { GM.tab = "champs"; renderGames(); } return; }
+    if ((x = at("[data-gday]"))) {
+      GM.tab = "list"; const day = x.dataset.gday;
+      return renderGames().then(() => { const el = document.getElementById(`gm-d-${day}`); if (el) el.scrollIntoView({ block: "start" }); });
+    }
+  };
+}
+
+/** 一局：开局时刻、模式、时长、阶段，两队 10 个人 */
+async function gmGameDialog(id) {
+  const g = await call("get_game", { id });
+  if (!g) return;
+  const m = g.match;
+  const facts = [[tr("开局"), `${gmDay(gmDayOf(m.start))} ${hm(m.start)}`], [tr("模式"), m.queue], [tr("时长"), durText(m.dur)], [tr("胜点"), gmLp(m.rank)],
+    [tr("排队"), m.phases ? durText(m.phases.queue) : ""], [tr("选人"), m.phases ? durText(m.phases.select) : ""], [tr("读条"), m.phases ? durText(m.phases.load) : ""], [tr("版本"), (m.version || "").split(".").slice(0, 2).join(".")]].filter(([, v]) => v);
+  const team = (t) => `<h3 class="gm-team">${esc([t.mine ? tr("我方") : tr("对方"), t.win ? tr("胜") : tr("负"), tr("{n} 杀", { n: t.kills }), tr("伤害 {v}", { v: gmNum(t.dmg) })].join(" · "))}</h3>
+    <div class="mx-table-wrap"><table class="mx-table gm-t gm-players"><thead><tr><th>${tr("英雄")}</th><th>${tr("玩家")}</th><th class="is-num">K/D/A</th><th class="is-num">${tr("伤害")}</th><th class="is-num">${tr("金币")}</th><th class="is-num">${tr("补刀")}</th></tr></thead><tbody>
+    ${t.players.map((p) => `<tr${p.me ? ' class="is-me"' : ""}><td>${esc(p.champ || `#${p.champ_id}`)}</td><td title="${esc(p.name + (p.tag ? "#" + p.tag : ""))}">${esc(p.name || "—")}</td><td class="is-num">${gmKda(p)}</td><td class="is-num">${gmNum(p.dmg)}</td><td class="is-num">${gmNum(p.gold)}</td><td class="is-num">${p.cs}</td></tr>`).join("")}</tbody></table></div>
+    ${t.bans.length ? `<p class="gm-bans">${esc(tr("禁用：{v}", { v: t.bans.map((b) => b.name || `#${b.id}`).join("、") }))}</p>` : ""}`;
+  openDialog({ title: `${m.champ || "—"} · ${gmResult(m)}`, cancel: tr("关闭"),
+    body: `<dl class="mx-facts gm-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>${g.teams.map(team).join("")}`,
+    onOpen: (el) => el.classList.add("gm-dlg") });
+}
+
 // ---------- 规矩 ----------
 
 const RS = { deleting: null };
@@ -3309,7 +3501,7 @@ function addPlaceDialog() {
 }
 
 /** 设置分六页，放在页头的页签里：通用｜账号｜记录｜连接｜数据｜项目。改了就存，不再有「保存设置」；要填几项的（地址、模型、密钥）开小弹层 */
-const SET_TABS = [["general", tr("通用")], ["record", tr("记录")], ["ai", "AI"], ["phone", tr("手机与手表")], ["data", tr("数据")]];
+const SET_TABS = [["general", tr("通用")], ["record", tr("记录")], ["ai", "AI"], ["phone", tr("手机与手表")], ["features", tr("功能")], ["data", tr("数据")]];
 // 以前的分页（账号、连接、项目）记在本机的，换成现在的
 try { const t = localStorage.getItem("settings-tab") || "general"; SS.tab = { account: "data", connect: "ai", projects: "general" }[t] || t; } catch (e) { SS.tab = "general"; }
 const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return u || ""; } };
@@ -3397,8 +3589,8 @@ async function renderSettings() {
   const tk = RT.seq;
   if (!S.settings) { S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings)); }
   const mobile = !!(S.status && S.status.mobile);
-  // 手机版不采集：没有「记录」页（暂停、不记录的 app、删最近记录都是电脑上的事）
-  const tabsHere = mobile ? SET_TABS.filter(([k]) => k !== "record") : SET_TABS;
+  // 手机版不采集：没有「记录」页（暂停、不记录的 app、删最近记录都是电脑上的事），也没有「功能」（游戏只在电脑上）
+  const tabsHere = mobile ? SET_TABS.filter(([k]) => k !== "record" && k !== "features") : SET_TABS;
   const tab = tabsHere.some(([k]) => k === SS.tab) ? SS.tab : "general";
   // 几样互不相干，一起问（原来一个等一个）
   const [sy, prof, st0, up, devs] = await Promise.all([
@@ -3440,6 +3632,9 @@ async function renderSettings() {
     body = aiBody(cf, st);
   } else if (tab === "phone") {
     body = (mobile ? phoneSection() : "") + (mobile ? section(tr("服务"), servicesRows(cf, st)) : group(servicesRows(cf, st)));
+  } else if (tab === "features") {
+    // 可选的功能，默认都关；每台电脑各自开
+    body = group(setRow(tr("游戏"), tr("Windows 上读英雄联盟客户端，记每一局的战绩；侧栏出现「游戏」"), `<button class="mx-switch" role="switch" id="games-on" aria-checked="${!!cf.games}" aria-label="${tr("游戏")}"></button>`));
   } else {
     body = syncPanel(sy) + devicesPanel(devs || [], st) + (SS.storage ? storageView(SS.storage) : "");
   }
@@ -3473,6 +3668,7 @@ async function renderSettings() {
     on("login", async () => { try { await call("set_login_item", { on: !st.login_item }); } catch (x) { alert(tr("没改成：{err}", { err: x })); } renderSettings(); });
     on("font-edit", () => fontDialog(renderSettings));
   }
+  if (tab === "features") on("games-on", async () => { await saveSome({ games: !cf.games }); renderSide(); renderSettings(); });
   if (tab === "record") {
     on("pause-off", async () => { await call("set_paused", { paused: false }); renderSettings(); });
     on("pause-open", () => choiceDialog({ title: tr("暂停记录"), options: PAUSES, note: tr("暂停期间不记录，到时间自动继续"), ok: tr("暂停"),
@@ -3876,7 +4072,7 @@ async function route() {
   const [page = "today", arg, arg2] = location.hash.replace(/^#\/?/, "").split("/");
   // 换页就关掉弹层；刚拿到恢复码那个必须点「我已存好」才关
   if (DLG && DLG.closable) closeDialog();
-  S.page = ["today", "summary", "money", "direction", "devices", "settings"].includes(page) ? page : "today";
+  S.page = ["today", "summary", "money", "games", "direction", "devices", "settings"].includes(page) ? page : "today";
   // 设置在电脑上是盖在页面上的弹层：底下那页不动，关掉回到它
   if (S.page !== "settings") { SET.back = key; dropSettings(); }
   if (S.page === "settings" && setModal()) return routeSettings(tk);
@@ -3885,6 +4081,7 @@ async function route() {
     if (!S.days.length && !S.status) await boot();
     if (!S.settings) {
       S.settings = await call("get_settings"); S.draft = JSON.parse(JSON.stringify(S.settings));
+      renderSide();
       // AI 总结「跟随界面」时后台要知道界面语言（界面语言只存在这台的 localStorage）：变了就报一次
       if (TAURI && S.settings.ui_lang !== LANG) saveSome({ ui_lang: LANG }).catch(() => {});
     }
@@ -3895,6 +4092,7 @@ async function route() {
     $app.classList.add(snap ? "is-stale" : "is-wait");
     if (S.page === "summary") await renderSummary(arg, arg2);
     else if (S.page === "money") await renderMoney(arg);
+    else if (S.page === "games") await renderGames(arg);
     else if (S.page === "direction") await (arg === "projects" ? renderProjects() : renderRules());
     else if (S.page === "devices") await renderDevice(decodeURIComponent(arg), arg2);
     else if (S.page === "settings") await renderSettings();

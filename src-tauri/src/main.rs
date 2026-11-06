@@ -11,6 +11,7 @@ mod storage;
 mod daily;
 mod data;
 mod fonts;
+mod games;
 mod health;
 mod icons;
 mod mcp;
@@ -421,6 +422,8 @@ fn main() {
             Some("llm_usage") => data::llm_usage(),
             Some("get_bills") => money::get_bills(args.get(3).cloned()),
             Some("money_overview") => money::money_overview(args.get(3).cloned()),
+            Some("games_overview") => games::games_overview(args.get(3).cloned()),
+            Some("get_game") => games::get_game(args.get(3).and_then(|x| x.parse().ok()).unwrap_or(0)),
             Some("rebuild_bills") => bills::rebuild_bills(),
             Some("classify_bills_ai") => money::classify_bills_ai(),
             Some("money_material") => json!(money::insight_material(&args.get(3).cloned().unwrap_or_default())),
@@ -454,7 +457,7 @@ fn main() {
             get_status, phone_read_now, set_paused, set_login_item, quit_app, open_permission, open_data_dir, dev_report,
             data::list_days, data::get_day, data::get_rules, data::save_rules,
             data::get_settings, data::save_settings, storage::storage_stats, data::llm_status, data::set_api_key, data::set_relay_token, data::delete_since, data::list_devices, data::rename_device, data::set_place_label, data::recent_events, data::set_place_pick, data::clear_place_pick, data::list_place_labels, data::place_stats, data::edit_place_label, amap::set_amap_key, amap::amap_around, amap::amap_search, amap::amap_map, amap::amap_js_config, amap::set_amap_js, icons::get_icons, daily::generate_daily, daily::daily_status, daily::get_week, daily::generate_weekly, daily::get_month, daily::generate_monthly, data::get_range, data::llm_usage, data::test_model, fonts::list_fonts,
-            bills::import_bills, bills::pick_bill_files, bills::rebuild_bills, bills::delete_bill_import, money::get_bills, money::get_bill, money::set_bill_class, money::classify_bills_ai, money::money_overview, money::generate_money_insight,
+            bills::import_bills, bills::pick_bill_files, bills::rebuild_bills, bills::delete_bill_import, money::get_bills, money::get_bill, money::set_bill_class, money::classify_bills_ai, money::money_overview, money::generate_money_insight, games::games_overview, games::get_game,
             data::get_profile, data::save_profile, data::list_projects, data::merge_project, data::set_project_domain,
             sync::sync_status, sync::sync_now,
             sync::account_signup, sync::account_login, sync::account_claim, sync::account_recover, sync::account_password,

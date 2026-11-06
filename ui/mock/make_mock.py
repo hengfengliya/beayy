@@ -881,7 +881,115 @@ def make_bills():
     mock["get_bills"], mock["money_overview"], mock["get_bill"] = gb, ov, one
 
 
+def make_games():
+    """游戏页：一个虚构的玩家（「雾港旧人#00001」，艾欧尼亚），近三周晚上打英雄联盟，排位和大乱斗；同局的人名全是编的。
+    写成 Windows 电脑 game.* 事件放进临时数据目录，再用真程序的 --dump 算出页面要的样子"""
+    import os, subprocess, tempfile
+    exe = next((p for p in [HERE.parents[1] / "target/debug/beayy", HERE.parents[1] / "target/release/beayy"] if p.exists()), None)
+    if not exe:
+        print("没找到 app/target/*/beayy，游戏样例沿用上次的")
+        return
+    r = random.Random(23)
+    champs = {103: "九尾妖狐", 99: "光辉女郎", 222: "暴走萝莉", 64: "盲僧", 157: "疾风剑豪", 412: "魂锁典狱长", 51: "皮城女警", 25: "堕落天使", 81: "探险家", 238: "影流之主",
+              266: "暗裔剑魔", 89: "曙光女神", 117: "仙灵女巫", 7: "诡术妖姬", 11: "无极剑圣", 22: "寒冰射手", 236: "圣枪游侠", 350: "魔法猫咪", 4: "卡牌大师", 3: "正义巨像"}
+    mine = [103, 99, 7, 4, 236]
+    names = ["山间小鹿", "不吃香菜", "晚风", "一只柚子", "北岛来信", "橘子汽水", "雾里看花", "慢慢来", "海盐芝士", "夏天的风", "白日梦", "听雨", "南瓜粥", "阿七", "鲸落", "小满", "半夏", "青柠", "云朵", "远山"]
+    queues = {420: ("排位赛 单排/双排", "CLASSIC", 11), 450: ("极地大乱斗", "ARAM", 12), 430: ("自选模式", "CLASSIC", 11)}
+    home = Path(tempfile.mkdtemp())
+    seg_root = home / "Library/Application Support/Beayy/devices" / WIN / "segments"
+
+    def put(t, e):
+        e = {"device": WIN, "timestamp": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), **e}
+        u = t.astimezone(timezone.utc)
+        d = seg_root / f"{u:%Y-%m-%dT%H}-{u.minute // 10 * 10:02d}-00Z"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "events.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+    me = {"puuid": "demo-me", "gameName": "雾港旧人", "tagLine": "00001"}
+    lp, tier, div = 58, "GOLD", "II"
+    rank = lambda: {"queues": [{"queue": "RANKED_SOLO_5x5", "tier": tier, "division": div, "lp": lp, "wins": 31 + wins, "losses": 28 + losses},
+                               {"queue": "RANKED_FLEX_SR", "tier": "SILVER", "division": "I", "lp": 12, "wins": 9, "losses": 11}]}
+    wins = losses = 0
+    first_day = TODAY - timedelta(days=20)
+    put(at(first_day, 19, 50), {"event_type": "game.client", "state": "connected", "puuid": me["puuid"], "game_name": me["gameName"], "tag_line": me["tagLine"], "level": 211,
+                                "region": "TENCENT", "locale": "zh_CN", "version": "16.21.1", "champions": {str(k): v for k, v in champs.items()}})
+    put(at(first_day, 19, 50, 2), {"event_type": "game.rank", **rank()})
+    gid = 11400000000
+    d = first_day
+    while d <= TODAY:
+        n = 0 if d.weekday() in (1, 3) else r.choice([0, 1, 2, 2, 3, 3, 4, 5]) if d.weekday() < 5 else r.choice([2, 3, 4, 5, 6])
+        t = at(d, r.choice([20, 20, 21, 21, 22]), r.randint(0, 50))
+        if d == TODAY:
+            n = 0
+        for _ in range(n):
+            gid += r.randint(3000, 90000)
+            q = r.choice([420, 420, 450, 450, 430])
+            qname, mode, mp = queues[q]
+            dur = r.randint(300, 2100) if q != 450 else r.randint(900, 1500)
+            if r.random() < 0.04:
+                dur = r.randint(160, 260)  # 重开
+            win = r.random() < 0.52
+            champ = r.choice(mine)
+            others = r.sample([c for c in champs if c != champ], 9)
+            team_ids = [100] * 5 + [200] * 5
+            parts, idents = [], []
+            pl = r.sample(names, 9)
+            for i in range(10):
+                c = champ if i == 0 else others[i - 1]
+                w = win if team_ids[i] == 100 else not win
+                k, dd, a = r.randint(1, 14), r.randint(1, 11), r.randint(2, 20)
+                if q == 450:
+                    k, a = k + r.randint(3, 10), a + r.randint(8, 20)
+                parts.append({"participantId": i + 1, "teamId": team_ids[i], "championId": c, "spell1Id": 4, "spell2Id": 14,
+                              "stats": {"win": w, "kills": k, "deaths": dd, "assists": a, "champLevel": r.randint(12, 18), "totalMinionsKilled": r.randint(20, 230) if q != 450 else r.randint(20, 80),
+                                        "neutralMinionsKilled": r.randint(0, 30), "totalDamageDealtToChampions": r.randint(9000, 42000) * (2 if q == 450 else 1), "goldEarned": r.randint(7000, 17000), "visionScore": r.randint(5, 60) if q != 450 else 0},
+                              "timeline": {"lane": "MIDDLE" if i == 0 else "NONE", "role": "SOLO"}})
+                pi = me if i == 0 else {"puuid": f"demo-{i}", "gameName": pl[i - 1], "tagLine": f"{r.randint(10000, 99999)}"}
+                idents.append({"participantId": i + 1, "player": {**pi, "platformId": "HN1", "summonerName": ""}})
+            mp0 = parts[0]["stats"]
+            team_kills = sum(p["stats"]["kills"] for p in parts if p["teamId"] == 100)
+            bans = [{"championId": c, "pickTurn": j + 1} for j, c in enumerate(r.sample([c for c in champs if c not in [champ, *others]], 3))] if q == 420 else []
+            raw = {"gameId": gid, "gameCreation": int(t.timestamp() * 1000), "gameDuration": dur, "queueId": q, "mapId": mp, "gameMode": mode, "gameType": "MATCHED_GAME", "gameVersion": "16.21.512.4021", "platformId": "HN1",
+                   "participants": parts, "participantIdentities": idents,
+                   "teams": [{"teamId": 100, "win": "Win" if win else "Fail", "bans": bans[:2]}, {"teamId": 200, "win": "Fail" if win else "Win", "bans": bans[2:]}]}
+            # 最近一周的局有阶段（补写的历史局没有）
+            if d >= TODAY - timedelta(days=7):
+                pt = t - timedelta(seconds=r.randint(150, 420))
+                for ph, sec in [("Matchmaking", r.randint(40, 260)), ("ReadyCheck", 8), ("ChampSelect", r.randint(60, 120) if q != 450 else 30), ("GameStart", r.randint(40, 90))]:
+                    extra = {"champ_select": {"champion_id": champ, "position": "middle" if q != 450 else "", "bans": [], "my_team": [], "their_team": []}} if ph == "GameStart" else {}
+                    put(pt, {"event_type": "game.phase", "phase": ph, "queue_id": q, "game_id": gid if ph == "GameStart" else 0, **extra})
+                    pt += timedelta(seconds=sec)
+                put(t, {"event_type": "game.phase", "phase": "InProgress", "queue_id": q, "game_id": gid})
+                e = t + timedelta(seconds=dur + 60)
+                for ph, sec in [("WaitingForStats", 15), ("PreEndOfGame", 20), ("EndOfGame", 45), ("Lobby", 0)]:
+                    put(e, {"event_type": "game.phase", "phase": ph, "queue_id": q, "game_id": gid if ph != "Lobby" else 0})
+                    e += timedelta(seconds=sec)
+            put(t, {"event_type": "game.match", "game_id": gid, "platform_id": "HN1", "queue_id": q, "queue_name": qname, "map_id": mp, "game_mode": mode, "game_type": "MATCHED_GAME",
+                    "game_version": raw["gameVersion"], "duration_s": dur, "started_at": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"), "champion_id": champ, "champion_name": champs[champ],
+                    "team_id": 100, "win": win, "kills": mp0["kills"], "deaths": mp0["deaths"], "assists": mp0["assists"], "team_kills": team_kills, "cs": mp0["totalMinionsKilled"] + mp0["neutralMinionsKilled"],
+                    "damage": mp0["totalDamageDealtToChampions"], "gold": mp0["goldEarned"], "vision": mp0["visionScore"], "level": mp0["champLevel"], "lane": "MIDDLE", "role": "SOLO", "puuid": me["puuid"], "raw": raw})
+            if q == 420 and dur >= 300:
+                if win:
+                    wins += 1; lp += r.randint(18, 24)
+                else:
+                    losses += 1; lp -= r.randint(15, 21)
+                if lp >= 100:
+                    lp -= 100; div = {"IV": "III", "III": "II", "II": "I"}.get(div, div)
+                lp = max(lp, 0)
+                put(t + timedelta(seconds=dur + 90), {"event_type": "game.rank", **rank()})
+            t += timedelta(seconds=dur + r.randint(300, 900))
+        d += timedelta(days=1)
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("BEAYY_SHADOW", None)
+    run = lambda *a: json.loads(subprocess.check_output([str(exe), "--dump", *a], env=env))
+    ov = run("games_overview")
+    mock["games_overview"] = ov
+    mock["get_game"] = {str(m["id"]): run("get_game", str(m["id"])) for m in ov["matches"][:40]}
+
+
 make_bills()
+make_games()
 
 for k, v in mock.items():
     (HERE / f"{k}.json").write_text(json.dumps(v, ensure_ascii=False), encoding="utf-8")

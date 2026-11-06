@@ -560,7 +560,7 @@ const REC_GAP: f64 = 300.0;
 /// device_events 读过的：（events.jsonl, 要的类型）→（修改时间、大小、挑出来的事件）。地点统计 30 天每个文件要读三遍
 static EV_FILES: std::sync::LazyLock<std::sync::Mutex<HashMap<(PathBuf, String), (std::time::SystemTime, u64, Vec<Value>)>>> = std::sync::LazyLock::new(Default::default);
 
-fn device_events(prefix: &str, types: &[&str], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Value> {
+pub(crate) fn device_events(prefix: &str, types: &[&str], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Value> {
     let mut out = vec![];
     let kinds = types.join(",");
     let (lo, hi) = (beayy_core::segment_key(from), beayy_core::segment_key(to));
@@ -1505,6 +1505,8 @@ pub fn get_settings() -> Value {
         // 自己选过间隔没有：没选过的跟着模型来源走（官方 60、自己的 10）
         "summary_minutes_set": s.get("summary_minutes").and_then(Value::as_i64).is_some(),
         "ui_lang": get("ui_lang", ""),
+        // 设置 → 功能：游戏（Windows 上读英雄联盟客户端、侧栏出游戏页），默认关
+        "games": s.get("games").and_then(Value::as_bool).unwrap_or(false),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
             Some(Value::Bool(true)) => "medium",
@@ -1517,7 +1519,7 @@ pub fn get_settings() -> Value {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games")];
     for (from, to) in map {
         if let Some(mut v) = settings.get(from).cloned() {
             // 同步服务器、转写服务填的就是官方的，存成空（官方地址以后变了跟着变）

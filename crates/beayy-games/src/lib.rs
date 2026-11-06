@@ -395,6 +395,9 @@ impl Watch {
         let region = c.get("/riotclient/region-locale").ok().flatten().unwrap_or(Value::Null);
         self.client = Some(c);
         self.fails = 0;
+        self.load_names();
+        // 英雄名表跟着连上这条走（几 KB）：别的电脑上看同局 10 个人用的英雄要它
+        let champions: Map<String, Value> = self.champions.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
         self.write(
             "game.client",
             fields! {
@@ -407,15 +410,15 @@ impl Watch {
                 "region" => region["region"],
                 "locale" => region["locale"],
                 "version" => version,
+                "champions" => champions,
             },
             None,
         );
-        self.load_names();
         self.check_rank();
         self.backfill();
     }
 
-    fn disconnect(&mut self, why: &str) {
+    pub fn disconnect(&mut self, why: &str) {
         self.write("game.client", fields! {"state" => "disconnected", "puuid" => self.puuid, "reason" => why}, None);
         self.client = None;
         self.phase = "None".into();
@@ -527,6 +530,18 @@ impl Watch {
         if let Some(t) = at {
             f.insert("started_at".into(), json!(iso(t)));
         }
+        // 别的电脑上没有英雄名表：同局 10 个人用的英雄名跟着这局走；puuid 认出哪一行是自己
+        let names: Map<String, Value> = m["participants"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                let id = p["championId"].as_i64()?;
+                Some((id.to_string(), json!(self.champions.get(&id)?)))
+            })
+            .collect();
+        f.insert("champion_names".into(), Value::Object(names));
+        f.insert("puuid".into(), json!(self.puuid));
         f.insert("raw".into(), m);
         if self.paused() {
             return Ok(Some(q));
@@ -539,7 +554,6 @@ impl Watch {
 
     /// 翻最近的对局列表，没记过的补写（旧的先写）
     fn backfill(&mut self) {
-        let first = self.seen.is_empty();
         let mut todo: Vec<(i64, i64)> = Vec::new();
         let mut beg = 0;
         while beg < BACKFILL_MAX {
@@ -556,8 +570,8 @@ impl Watch {
                     fresh += 1;
                 }
             }
-            // 不是第一次：翻到全是记过的那页就停
-            if fresh == 0 && !first || games.len() < PAGE {
+            // 翻到全是记过的那页就停；国服不认翻页参数，每页都是同样的最近 20 来局，第二页就停在这
+            if fresh == 0 || games.len() < PAGE {
                 break;
             }
             beg += PAGE;
@@ -584,10 +598,27 @@ impl Watch {
 }
 
 /// 起后台线程：找客户端、记阶段和每一局
+/// 设置 → 功能 → 游戏（settings.json 的 games），默认关
+pub fn enabled() -> bool {
+    std::fs::read_to_string(beayy_core::default_root().join("settings.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["games"].as_bool())
+        .unwrap_or(false)
+}
+
 pub fn start(log: Arc<EventLog>, paused: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let mut w = Watch::new(&data_root(), log, paused);
         loop {
+            // 关着就不碰客户端；连着的时候关掉，记一条断开
+            if !enabled() {
+                if w.connected() {
+                    w.disconnect("关掉了游戏记录");
+                }
+                std::thread::sleep(LOOK_EVERY);
+                continue;
+            }
             let wait = w.step();
             std::thread::sleep(wait);
         }

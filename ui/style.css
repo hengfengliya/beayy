@@ -350,6 +350,41 @@ button.mn-dl-row:hover { background: var(--hover); border-radius: var(--radius-m
 .bill-meta { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); user-select: text; }
 @media (max-width: 1099px) { #bill-body .readouts .v { font-size: 24px; } .mx-table.bills .b-method, .mx-table.bills td:nth-child(5) { display: none; } .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child) { width: 96px; } .mx-table.bills-who .b-time { width: 56px; } .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 88px; } .bill-budget { grid-template-columns: minmax(0, 1fr) 120px; } .bill-budget .bill-bar { display: none; } }
 @media (max-width: 759px) { .mx-table.bills-to th:not(:first-child), .mx-table.bills-who th:not(:first-child), .mx-table.bills-ct th:not(:first-child):not(.b-bar) { width: 72px; } .mx-table.bills .b-time { width: 88px; } .mx-table.bills .b-amt { width: 96px; } .mx-table.bills th:nth-child(3), .mx-table.bills td:nth-child(3), .mx-table.bills .b-cat, .mx-table.bills td:nth-child(4), .mx-table.bills .b-src, .mx-table.bills td:nth-child(6) { display: none; } .mx-table.bill-imports .b-range, .mx-table.bill-imports td:nth-child(2), .mx-table.bill-imports .b-at, .mx-table.bill-imports td:nth-child(6) { display: none; } .mx-table.bills-ct .b-bar, .mx-table.bills-ct td:nth-child(2) { display: none; } .mn-donut { grid-template-columns: 1fr; justify-items: center; } .mn-dl { width: 100%; } .mn-days .mn-col:not(.is-tick) .mn-l { visibility: hidden; } .mn-cols { gap: 4px; } .mn-days { gap: 1px; } }
+/* 侧栏入口按条件藏起来（游戏关着、手机上的收支）：设计系统给 a 写了 display，盖过了 hidden */
+.mx-nav a[hidden] { display: none; }
+/* 游戏页：账号写在页头右边；读数五个一排；每天的柱沿用收支的 mn-days；什么时候玩（一天一行、24 小时横轴，时刻等宽）；对局表；一局的弹层 */
+.gm-who { margin-right: var(--space-3); font-size: 13px; color: var(--ink-3); }
+#gm-body .readouts { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.gm-tl { display: grid; gap: 6px; }
+.gm-tl-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: var(--space-3); }
+.gm-tl-d { font-size: 12px; line-height: 16px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-tl-track { position: relative; height: 14px; border-radius: 3px; background: var(--rec-track); }
+.gm-tl-track i { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: 2px; background: var(--rec-computer); }
+.gm-tl-track i.is-night { background: var(--rec-night); }
+.gm-tl-ticks { position: relative; height: 16px; }
+.gm-tl-ticks span { position: absolute; transform: translateX(-50%); font: 11px/16px var(--font-mono); color: var(--ink-4); }
+.gm-tl-ticks span:first-child { transform: none; }
+.gm-tl-ticks span:last-child { transform: translateX(-100%); }
+.mx-table.gm-t tbody tr[data-game], .mx-table.gm-t tbody tr[data-gchamp] { cursor: pointer; }
+.mx-table.gm-t th:first-child { width: auto; }
+.mx-table.gm-champs .g-n { width: 40px; }
+.mx-table.gm-champs .g-kda { width: 104px; }
+.mx-table.gm-champs .g-dmg, .mx-table.gm-champs .g-dur { width: 64px; }
+.mx-table.gm-games .g-time { width: 40px; }
+.mx-table.gm-games .g-res { width: 32px; }
+.mx-table.gm-games th.is-num { width: 64px; }
+.mx-table.gm-games th.is-num:nth-child(6) { width: 88px; }
+.mx-table.gm-players th.is-num { width: 64px; }
+.mx-table.gm-players th.is-num:last-child { width: 40px; }
+.mx-table.gm-games tr.is-remake td { color: var(--ink-4); }
+.gm-sub { margin-left: 6px; font-size: 12px; color: var(--ink-4); }
+.mx-dialog.gm-dlg { width: min(720px, 100%); }
+.gm-dlg .mx-dialog-body > * { flex: none; }
+.gm-facts { margin-bottom: var(--space-2); }
+.gm-team { margin: var(--space-5) 0 var(--space-2); font-size: 13px; line-height: 20px; font-weight: 600; }
+.mx-table.gm-players tr.is-me td { font-weight: 600; }
+.gm-bans { margin: var(--space-2) 0 0; font-size: 12px; color: var(--ink-4); }
+@media (max-width: 759px) { #gm-body .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gm-tl-row { grid-template-columns: 76px minmax(0, 1fr); } .mx-table.gm-games th:nth-child(2), .mx-table.gm-games td:nth-child(2), .mx-table.gm-games th:nth-child(7), .mx-table.gm-games td:nth-child(7) { display: none; } .mx-table.gm-players th:nth-child(5), .mx-table.gm-players td:nth-child(5), .mx-table.gm-players th:nth-child(6), .mx-table.gm-players td:nth-child(6) { display: none; } }
 /* 设置「数据」页的表 */
 .mx-table.store th:last-child { width: 32%; }
 .mx-table.store .num { width: 15%; text-align: right; }
