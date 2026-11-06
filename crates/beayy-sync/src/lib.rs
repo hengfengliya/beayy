@@ -798,6 +798,8 @@ impl Dav {
 
     fn call(&self, method: &str, rel: &str, depth: Option<&str>, body: Option<&[u8]>) -> Result<ureq::http::Response<ureq::Body>, String> {
         let m = ureq::http::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
+        // 块名、设备名可能是中文（win-小栗子），按段编码，/ 保留
+        let rel = rel.split('/').map(url_escape).collect::<Vec<_>>().join("/");
         let mut b = ureq::http::Request::builder().method(m).uri(format!("{}/{rel}", self.base)).header("Authorization", &self.auth);
         if let Some(d) = depth {
             b = b.header("Depth", d).header("Content-Type", "application/xml; charset=utf-8");
@@ -1394,8 +1396,14 @@ pub struct Report {
     pub errors: Vec<String>,
 }
 
+/// 设备名、块名：字母数字（含中文，Windows 计算机名可以是「小栗子」）和 . - _，不超过 80 个字，不能全是点
 fn safe_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 80 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    !s.is_empty() && s.chars().count() <= 80 && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_')) && !s.chars().all(|c| c == '.')
+}
+
+/// 数据块的地址；名字要编码，原样发中文 Cloudflare 回 400
+fn blob_url(server: &str, d: &str, n: &str) -> String {
+    format!("{server}/v1/blob/{}/{}", url_escape(d), url_escape(n))
 }
 
 /// 一轮：先上传本机写的分段里变了的，再下载别的设备新传的。没开同步返回 None
@@ -1542,7 +1550,7 @@ fn sync_round(root: &Path, local_device: &str, upload: bool) -> Option<Report> {
                                         });
                                     }
                                     let resp = ag
-                                        .put(&format!("{}/v1/blob/{d}/{n}", a.server))
+                                        .put(&blob_url(&a.server, d, n))
                                         .header("Authorization", &a.auth())
                                         .header("Content-Type", "application/octet-stream")
                                         .send(&blob[..])
@@ -1726,7 +1734,7 @@ pub fn put_named(root: &Path, device: &str, name: &str, plain: &[u8]) -> Result<
         return store.write(&blob_rel(device, name), &blob);
     }
     let r = agent()
-        .put(&format!("{}/v1/blob/{device}/{name}", a.server))
+        .put(&blob_url(&a.server, device, name))
         .header("Authorization", &a.auth())
         .header("Content-Type", "application/octet-stream")
         .send(&blob[..])
@@ -1746,7 +1754,7 @@ pub fn get_named(root: &Path, device: &str, name: &str) -> Result<Option<Vec<u8>
             None => Ok(None),
         };
     }
-    let mut r = agent().get(&format!("{}/v1/blob/{device}/{name}", a.server)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
+    let mut r = agent().get(&blob_url(&a.server, device, name)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
     if r.status().as_u16() == 404 {
         return Ok(None);
     }
@@ -1762,7 +1770,7 @@ pub fn delete_named(root: &Path, device: &str, name: &str) -> Result<(), String>
     if let Some(store) = a.remote() {
         return store.remove(&blob_rel(device, name));
     }
-    let r = agent().delete(&format!("{}/v1/blob/{device}/{name}", a.server)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
+    let r = agent().delete(&blob_url(&a.server, device, name)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
     if !r.status().is_success() {
         return Err(err_of(r));
     }
@@ -1849,7 +1857,7 @@ pub fn ticket_for(root: &Path, kind: &str) -> Result<(String, i64), String> {
 
 /// 取一块密文并解开
 fn fetch(a: &Account, ag: &ureq::Agent, d: &str, n: &str) -> Result<Vec<u8>, String> {
-    let mut resp = ag.get(&format!("{}/v1/blob/{d}/{n}", a.server)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
+    let mut resp = ag.get(&blob_url(&a.server, d, n)).header("Authorization", &a.auth()).call().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(err_of(resp));
     }
@@ -2098,6 +2106,13 @@ mod tests {
         assert_eq!(daily_file("daily.w.20261026.md").as_deref(), Some("周总结_20261026.md"));
         assert_eq!(daily_file("daily.x.2026.md"), None);
         assert!(safe_name(&daily_block("周总结_20261026.md").unwrap()));
+    }
+
+    #[test]
+    fn unicode_device_names() {
+        assert!(safe_name("win-小栗子"));
+        assert!(!safe_name("..") && !safe_name("a/b") && !safe_name("a b") && !safe_name(""));
+        assert_eq!(blob_url("https://s", "win-小栗子", "daily.d.20261105.md"), "https://s/v1/blob/win-%E5%B0%8F%E6%A0%97%E5%AD%90/daily.d.20261105.md");
     }
 
     #[test]

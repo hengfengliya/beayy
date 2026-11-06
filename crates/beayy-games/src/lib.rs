@@ -104,6 +104,10 @@ pub fn find_lock() -> Option<Lock> {
                     return Some(l);
                 }
             }
+            // 国服（WeGame）的 lockfile 是空的、命令行要管理员才读得到，但客户端日志开头记着启动参数
+            if let Some(l) = win::log_lock(pid, &dir) {
+                return Some(l);
+            }
             if let Some(l) = win::cmdline_lock(pid) {
                 return Some(l);
             }
@@ -163,6 +167,17 @@ mod win {
             let _ = CloseHandle(h);
             ok.then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
         }
+    }
+
+    /// 客户端日志 `<时刻>_<LeagueClient 进程号>_<进程号>_LeagueClientUx.log` 开头的「Cef CommandLine」带端口和令牌
+    pub fn log_lock(pid: u32, dir: &std::path::Path) -> Option<Lock> {
+        use std::io::Read;
+        let tail = format!("_{pid}_LeagueClientUx.log");
+        let mut logs: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(&tail))).collect();
+        logs.sort();
+        let mut head = Vec::new();
+        std::fs::File::open(logs.pop()?).ok()?.take(256 * 1024).read_to_end(&mut head).ok()?;
+        parse_cmdline(&String::from_utf8_lossy(&head))
     }
 
     /// 没有 lockfile 时读命令行（PowerShell，同一个进程只读一次）。客户端以管理员身份跑时读不到
@@ -425,7 +440,8 @@ impl Watch {
             let m: BTreeMap<i64, String> = a
                 .iter()
                 .filter_map(|q| {
-                    let n = [&q["description"], &q["name"], &q["shortName"]].into_iter().filter_map(Value::as_str).find(|s| !s.is_empty())?;
+                    // 国服的名字有的带尾随空格（「海克斯大乱斗 」）
+                    let n = [&q["description"], &q["name"], &q["shortName"]].into_iter().filter_map(Value::as_str).map(str::trim).find(|s| !s.is_empty())?;
                     Some((q["id"].as_i64()?, n.to_string()))
                 })
                 .collect();
@@ -589,6 +605,9 @@ mod tests {
         let cmd = r#""D:\Games\LeagueClient\LeagueClientUx.exe" "--riotclient-auth-token=x" "--app-port=61234" "--remoting-auth-token=Zk9-q_1" "--locale=zh_CN""#;
         assert_eq!(parse_cmdline(cmd), Some(Lock { port: 61234, password: "Zk9-q_1".into(), protocol: "https".into() }));
         assert_eq!(parse_cmdline("--app-port=1"), None);
+        // 国服客户端日志的开头两行：前一行是 Riot 客户端的端口，不能当成本机接口的
+        let log = "000000.000|   OKAY| Command line arguments: --riotclient-auth-token=AAA --riotclient-app-port=61292 --region=TENCENT\n000000.001| ALWAYS| Cef CommandLine: d:/wegameapps/英雄联盟/LeagueClient/LeagueClientUx.exe --app-pid=32444 --app-port=55554 --remoting-auth-token=Bq3_x-9 --respawn-command=LeagueClient.exe\n";
+        assert_eq!(parse_cmdline(log), Some(Lock { port: 55554, password: "Bq3_x-9".into(), protocol: "https".into() }));
     }
 
     #[test]

@@ -77,6 +77,8 @@ OFFICIAL_HOST = os.environ.get("BEAYY_OFFICIAL_HOST", "").rstrip("/")
 
 NAME = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 PREFIX = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
+# 设备名、分段名：设备名带计算机名，可能是中文（win-小栗子），所以字母数字放宽到 Unicode；不许 / 和全是点（. ..）
+BLOB_NAME = re.compile(r"[\w.-]{1,80}")
 USER = re.compile(r"^[0-9a-f]{24}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SALT = re.compile(r"^[0-9a-f]{32}$")
@@ -118,6 +120,10 @@ def init():
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def ok_name(s: str) -> bool:
+    return bool(BLOB_NAME.fullmatch(s)) and s.strip(".") != ""
 
 
 def blob_path(user: str, device: str, segment: str) -> Path:
@@ -402,7 +408,7 @@ async def put_blob(device: str, segment: str, request: Request):
     who = auth(request)
     if not who:
         return unauthorized()
-    if not NAME.match(device) or not NAME.match(segment):
+    if not ok_name(device) or not ok_name(segment):
         return json_resp({"error": "设备名或分段名不合法"}, 400)
     data = await request.body()
     if len(data) > MAX_BLOB:
@@ -434,7 +440,7 @@ def get_blob(device: str, segment: str, request: Request):
     who = auth(request)
     if not who:
         return unauthorized()
-    if not NAME.match(device) or not NAME.match(segment):
+    if not ok_name(device) or not ok_name(segment):
         return json_resp({"error": "设备名或分段名不合法"}, 400)
     p = blob_path(who["user"], device, segment)
     if not p.is_file():
@@ -447,7 +453,7 @@ def delete_blob(device: str, segment: str, request: Request):
     who = auth(request)
     if not who:
         return unauthorized()
-    if not NAME.match(device) or not NAME.match(segment):
+    if not ok_name(device) or not ok_name(segment):
         return json_resp({"error": "设备名或分段名不合法"}, 400)
     blob_path(who["user"], device, segment).unlink(missing_ok=True)
     c = db()
@@ -466,7 +472,7 @@ def list_blobs(request: Request, since: str = "0", prefix: str = "", device: str
     except ValueError:
         since_n = 0
     # 可按块名前缀（transcript.、audio.、places.）和设备筛
-    if (prefix and not PREFIX.match(prefix)) or (device and not NAME.match(device)):
+    if (prefix and not PREFIX.match(prefix)) or (device and not ok_name(device)):
         return json_resp({"error": "筛选条件不合法"}, 400)
     # 从头按前缀列走 (user, segment)，只读这一类；增量列走 (user, updated)，只读新来的
     index = "blobs_seg" if prefix and not since_n else "blobs_updated"
