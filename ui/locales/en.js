@@ -1618,5 +1618,7 @@ window.I18N_EN = {
   "已有账号，登录": "I have an account",
   "已登录 {email}": "Signed in as {email}",
   "新账号每月送 5 万 token，够试用，天天用要填自己的网关": "New accounts get 50k tokens a month, enough to try it out. For daily use, add your own gateway",
-  "只用来开官方模型、转写和地图": "Only for the official model, transcription and map"
+  "只用来开官方模型、转写和地图": "Only for the official model, transcription and map",
+  "{path} 回 {st}": "{path} returned {st}",
+  "没连上": "Not connected"
 };

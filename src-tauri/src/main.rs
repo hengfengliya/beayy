@@ -491,6 +491,8 @@ fn main() {
             beayy_capture::macos::start(state.log.clone(), state.paused.clone());
             #[cfg(target_os = "windows")]
             beayy_capture::windows::start(state.log.clone(), state.paused.clone());
+            // 英雄联盟：客户端开着时从它的本机接口记阶段、每一局、段位（只读，见 crates/beayy-games）
+            beayy_games::start(state.log.clone(), state.paused.clone());
 
             // 10 分钟摘要：每个整 10 分过后 1 分钟调起 Python 脚本（并跑版也跑，脚本跳过已写过的分段，锁文件防重入）
             summarizer::start(state.log.clone(), state.paused.clone());

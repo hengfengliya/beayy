@@ -19,6 +19,7 @@ beayy-capture.workspace = true
 beayy-summary.workspace = true
 beayy-sync.workspace = true
 beayy-remote.workspace = true
+beayy-games.workspace = true
 regex = "1"
 sha2 = "0.10"
 ureq = { version = "3", default-features = false, features = ["json", "native-tls"] }

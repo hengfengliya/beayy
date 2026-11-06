@@ -144,6 +144,7 @@ version = "0.2.55"
 dependencies = [
  "beayy-capture",
  "beayy-core",
+ "beayy-games",
  "beayy-install",
  "beayy-phone",
  "beayy-remote",
@@ -188,6 +189,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sys-locale",
+]
+
+[[package]]
+name = "beayy-games"
+version = "0.2.55"
+dependencies = [
+ "base64 0.22.1",
+ "beayy-core",
+ "chrono",
+ "serde_json",
+ "ureq",
+ "windows",
 ]
 
 [[package]]
