@@ -41,7 +41,8 @@ const RELAY_EVERY: Duration = Duration::from_secs(120);
 
 struct AppState {
     log: Arc<EventLog>,
-    phone: Mutex<PhoneSync>,
+    /// iPhone 同步的最近一句状态。同步本身在自己的线程里跑、不占这把锁（以前整轮都锁着，get_status 跟着等，更新重启后窗口卡住）
+    phone: Mutex<String>,
     relay: Mutex<Relay>,
     /// 录音和停留点走账号同步的上一轮结果（设置「连接」和「数据」页显示）
     cloud: Mutex<String>,
@@ -74,16 +75,17 @@ fn events_today(state: &AppState) -> u64 {
     base + state.log.count().saturating_sub(at)
 }
 
-#[tauri::command]
-fn get_status(state: tauri::State<'_, Arc<AppState>>) -> Value {
-    json!({
+/// 不在主线程上跑（async）：里面要等几把锁、问系统登录项，慢了只是这个请求慢，窗口不卡
+#[tauri::command(async)]
+async fn get_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Value, String> {
+    Ok(json!({
         "permissions": beayy_capture::permissions(),
         "capturing": capturing(),
         "paused": state.paused.load(Ordering::Relaxed),
         "paused_until": state.paused_until.lock().unwrap().map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
         "events_today": events_today(&state),
         "login_item": login_item(),
-        "phone_sync": state.phone.lock().unwrap().last_summary.clone(),
+        "phone_sync": state.phone.lock().unwrap().clone(),
         "relay_sync": state.relay.lock().unwrap().last_summary.clone(),
         "cloud_sync": state.cloud.lock().unwrap().clone(),
         "device": state.log.device,
@@ -91,7 +93,7 @@ fn get_status(state: tauri::State<'_, Arc<AppState>>) -> Value {
         "shadow": shadow_mode(),
         // 本机 MCP 服务就是这个程序加 --mcp（设置里给 AI 接入的命令）
         "exe": std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
-    })
+    }))
 }
 
 fn capturing() -> bool {
@@ -471,7 +473,7 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let root = data_root();
-            let state = Arc::new(AppState { log: Arc::new(EventLog::new(root.clone(), local_device())), phone: Mutex::new(PhoneSync::default()), relay: Mutex::new(Relay::default()), cloud: Mutex::new(String::new()), paused: Arc::new(AtomicBool::new(false)), paused_until: Mutex::new(None), today_base: Mutex::new(None) });
+            let state = Arc::new(AppState { log: Arc::new(EventLog::new(root.clone(), local_device())), phone: Mutex::new(String::new()), relay: Mutex::new(Relay::default()), cloud: Mutex::new(String::new()), paused: Arc::new(AtomicBool::new(false)), paused_until: Mutex::new(None), today_base: Mutex::new(None) });
             #[allow(unused_mut)]
             let mut launch = fields! {
                 "version" => env!("CARGO_PKG_VERSION"),
@@ -570,8 +572,12 @@ fn main() {
             let phone_item = phone.clone();
             let phone_now = Arc::new(AtomicBool::new(false));
             let phone_now2 = phone_now.clone();
-            std::thread::spawn(move || loop {
-                let notes = st.phone.lock().unwrap().sync(&root);
+            std::thread::spawn(move || {
+              // 同步用线程自己的一份，状态句写回 AppState（别的地方只读这句）
+              let mut phone = PhoneSync::default();
+              loop {
+                let notes = phone.sync(&root);
+                *st.phone.lock().unwrap() = phone.last_summary.clone();
                 for n in notes.iter().filter(|n| n.added > 0) {
                     st.log.write(
                         "phone.sync",
@@ -579,12 +585,13 @@ fn main() {
                         None,
                     );
                 }
-                let _ = phone_item.set_text(tr_with("iPhone：{s}", &[("s", &tr_msg(&st.phone.lock().unwrap().last_summary))]));
+                let _ = phone_item.set_text(tr_with("iPhone：{s}", &[("s", &tr_msg(&phone.last_summary))]));
                 let mut waited = Duration::ZERO;
                 while waited < PHONE_EVERY && !phone_now2.swap(false, Ordering::Relaxed) && !PHONE_NOW.swap(false, Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_secs(1));
                     waited += Duration::from_secs(1);
                 }
+              }
             });
             // 后台：手表对话、iPhone 停留点每 2 分钟一轮（走账号同步；没登录就什么都不做）。旧录音服务器（v1）10-29 下掉，不再拉
             let st = state.clone();

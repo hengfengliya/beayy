@@ -2586,7 +2586,7 @@ function gmSteamView() {
   return { cut, sessions: d.sessions.filter((x) => !cut || gmDayOf(x.start) >= cut), days: d.days.filter((x) => !cut || x.date >= cut) };
 }
 
-/** 每款：这段时间玩了几次、多久、最近一次；累计是 Steam 自己记的总时长。选「全部」时没在 Beayy 里记过的也列上 */
+/** 每款：这段时间玩了几次、多久、最近一次；累计是 Steam 自己记的总时长。选「全部」、或这段时间一次没玩过时，游戏库里的也列上 */
 function gmSteamApps(ss) {
   const lib = new Map((GM.data.library || []).map((a) => [a.appid, a]));
   const by = new Map();
@@ -2596,7 +2596,7 @@ function gmSteamApps(ss) {
     if (x.start > a.last) a.last = x.start;
     by.set(x.appid, a);
   }
-  if (GM.range === "all") for (const l of lib.values()) if (!by.has(l.appid)) by.set(l.appid, { appid: l.appid, name: l.name, n: 0, play: 0, last: l.last });
+  if (GM.range === "all" || !ss.length) for (const l of lib.values()) if (!by.has(l.appid)) by.set(l.appid, { appid: l.appid, name: l.name, n: 0, play: 0, last: l.last });
   return [...by.values()].map((a) => ({ ...a, total: lib.has(a.appid) ? lib.get(a.appid).total_min * 60 : null })).sort((a, b) => b.play - a.play || (b.total || 0) - (a.total || 0));
 }
 
@@ -2653,9 +2653,16 @@ async function renderGames(arg) {
   const steam = d.game === "steam";
   const pick = `<div class="pick"><button class="mx-btn mx-btn--secondary bill-month" id="gm-game" aria-haspopup="menu" aria-expanded="false">${esc(tr(GM_GAMES[GM.game]))}${ICON.chevD}</button>
       <div class="mx-menu" role="menu" hidden>${on.map((k) => `<button role="menuitemradio" aria-checked="${k === GM.game}" data-ggame="${k}">${esc(tr(GM_GAMES[k]))}${k === GM.game ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
-  if (!(steam ? d.sessions : d.matches).length) {
+  // 右上角切游戏：有数据、没数据两种页面都要绑（只绑 bindPick 的话菜单能开、点了没反应）
+  const bindGamePick = () => {
+    const b = document.getElementById("gm-game");
+    bindPick(b);
+    b.parentElement.onclick = (e) => { const x = e.target.closest("[data-ggame]"); if (x) { x.parentElement.hidden = true; location.hash = `#/games/${x.dataset.ggame}`; } };
+  };
+  // Steam 只有游戏库（Steam 自己记的总时长）、还没记过一次也算有数据
+  if (!(steam ? d.sessions.length || (d.library || []).length : d.matches.length)) {
     $app.innerHTML = header(tr("游戏"), pick) + `<div class="reading">${emptyBlock("day", steam ? tr("在 Windows 电脑的 Beayy 里也打开「游戏」，玩 Steam 游戏的时长会记在这里") : tr("在 Windows 电脑的 Beayy 里也打开「游戏」，打的每一局英雄联盟会记在这里"))}</div>`;
-    bindPick(document.getElementById("gm-game"));
+    bindGamePick();
     return;
   }
   const a = d.account;
@@ -2665,8 +2672,7 @@ async function renderGames(arg) {
   const seg = `<div class="mx-seg" role="tablist">${[["7", tr("近 7 天")], ["30", tr("近 30 天")], ["all", tr("全部")]].map(([k, v]) => `<button role="tab" aria-selected="${k === GM.range}" class="${k === GM.range ? "is-on" : ""}" data-grange="${k}">${v}</button>`).join("")}</div>`;
   $app.innerHTML = header(tr("游戏"), (who ? `<span class="gm-who" title="${esc(a.level ? tr("{n} 级", { n: a.level }) : "")}">${esc(who)}</span>` : "") + pick) + `<div id="games"><div class="toolbar"><div class="toolbar-left">${tabs}${tabs ? '<span class="tb-sep"></span>' : ""}${seg}</div></div><div class="reading" id="gm-body"></div></div>`;
   drawGames();
-  bindPick(document.getElementById("gm-game"));
-  document.getElementById("gm-game").parentElement.onclick = (e) => { const x = e.target.closest("[data-ggame]"); if (x) location.hash = `#/games/${x.dataset.ggame}`; };
+  bindGamePick();
   document.getElementById("games").onclick = (e) => {
     const at = (sel) => e.target.closest(sel);
     let x;
