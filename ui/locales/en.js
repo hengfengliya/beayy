@@ -1712,5 +1712,7 @@ window.I18N_EN = {
   "三杀": "Triple",
   "一血": "First blood",
   "伤害最高": "Most damage",
-  "承伤最高": "Most tanked"
+  "承伤最高": "Most tanked",
+  "新版本弹窗提醒": "Pop up when an update is ready",
+  "关了只在头像上挂一个点": "When off, only a dot appears on your avatar"
 };

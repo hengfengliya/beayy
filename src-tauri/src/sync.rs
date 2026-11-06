@@ -2,7 +2,7 @@
 //! 每 5 分钟一轮；测试版（--shadow）不同步，免得把影子目录传上去。
 
 use beayy_core::{data_root, fields, local_device, shadow_mode, EventLog};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -43,6 +43,7 @@ pub fn start(log: Arc<EventLog>) {
     std::thread::spawn(move || loop {
         run(Some(&log));
         pull_profile();
+        sync_settings();
         // 等 5 分钟，期间页面点了「立即同步」就提前跑
         let mut waited = Duration::ZERO;
         while waited < EVERY {
@@ -54,6 +55,92 @@ pub fn start(log: Arc<EventLog>) {
             }
         }
     });
+}
+
+/// 跟着账号走的设置；别的只存本机：模型和网关跟着本机的密钥，不记录的 app 写法分系统，同步方式、数据目录各台不同；
+/// 主题、语言、字体在网页的本机存储里
+pub const SHARED: [&str; 9] = ["summary_language", "roast", "summary_minutes", "games", "games_lol", "games_steam", "update_prompt", "map_provider", "speaker_name"];
+
+/// 合并本机设置和账号上那份（`account/settings.json`：{v, keys: {项: {v, at}}}）：每项各记最后改的时刻（本机记在 settings.json 的 settings_at），新的为准。
+/// 本机设过、没记时刻的（同步设置以前的版本存的）：账号上已经有就听账号的，没有就推上去。返回（本机改了没有，要推上去的整份）
+fn merge_shared(s: &mut Map<String, Value>, remote: &Value) -> (bool, Option<Value>) {
+    let mut at = s.get("settings_at").and_then(Value::as_object).cloned().unwrap_or_default();
+    let mut out = remote["keys"].as_object().cloned().unwrap_or_default();
+    let (mut local, mut push) = (false, false);
+    for k in SHARED {
+        let r = &remote["keys"][k];
+        let ra = r["at"].as_i64().unwrap_or(0);
+        let la = at.get(k).and_then(Value::as_i64).unwrap_or(if s.contains_key(k) && r.is_null() { 1 } else { 0 });
+        if ra > la {
+            s.insert(k.into(), r["v"].clone());
+            at.insert(k.into(), json!(ra));
+            local = true;
+        } else if la > ra {
+            if let Some(v) = s.get(k) {
+                out.insert(k.into(), json!({ "v": v, "at": la }));
+                push = true;
+            }
+        }
+    }
+    if local {
+        s.insert("settings_at".into(), Value::Object(at));
+    }
+    (local, push.then(|| json!({ "v": 1, "keys": out })))
+}
+
+/// 设置跟着账号同步（开了同步才有）；连不上就等下一轮
+fn sync_settings() {
+    let root = data_root();
+    if beayy_sync::load(&root).is_none() && beayy_sync::service(&root).is_none() {
+        return;
+    }
+    let Ok(got) = beayy_sync::get_named(&root, "account", "settings.json") else { return };
+    let remote: Value = got.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+    let mut s = crate::data::read_settings_raw();
+    let (local, push) = merge_shared(&mut s, &remote);
+    if local {
+        let _ = crate::data::write_settings_raw(s);
+    }
+    if let Some(body) = push {
+        let _ = beayy_sync::put_named(&root, "account", "settings.json", body.to_string().as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map(v: Value) -> Map<String, Value> {
+        v.as_object().cloned().unwrap()
+    }
+
+    #[test]
+    fn shared_settings_newest_wins() {
+        // 本机新改的推上去；账号上更新的拉下来；本机专有的不动
+        let mut s = map(json!({ "games": true, "roast": "off", "gateway": "x", "settings_at": { "games": 200, "roast": 50 } }));
+        let remote = json!({ "keys": { "games": { "v": false, "at": 100 }, "roast": { "v": "high", "at": 90 } } });
+        let (local, push) = merge_shared(&mut s, &remote);
+        assert!(local);
+        assert_eq!(s["roast"], "high");
+        assert_eq!(s["games"], true);
+        assert_eq!(s["gateway"], "x");
+        let push = push.unwrap();
+        assert_eq!(push["keys"]["games"]["v"], true);
+        assert_eq!(push["keys"]["roast"]["v"], "high");
+        // 老版本存的、没记时刻：账号上没有就推，有就听账号的
+        let mut a = map(json!({ "games": true }));
+        let (l, p) = merge_shared(&mut a, &Value::Null);
+        assert!(!l);
+        assert_eq!(p.unwrap()["keys"]["games"]["at"], 1);
+        let mut b = map(json!({ "games": false }));
+        let (l, p) = merge_shared(&mut b, &json!({ "keys": { "games": { "v": true, "at": 1 } } }));
+        assert!(l && p.is_none());
+        assert_eq!(b["games"], true);
+        // 都一样：什么都不做
+        let mut c = map(json!({ "games": true, "settings_at": { "games": 7 } }));
+        let (l, p) = merge_shared(&mut c, &json!({ "keys": { "games": { "v": true, "at": 7 } } }));
+        assert!(!l && p.is_none());
+    }
 }
 
 /// 头像和名称：账号上的比本机新（在别的设备上改过）就拉下来；本机的更新（登录账号以前设的、
@@ -353,7 +440,11 @@ pub fn cli(args: &[String]) -> Option<i32> {
         Some("--sync-status") => Ok(serde_json::to_string_pretty(&beayy_sync::status(&root)).unwrap()),
         Some("--sync-once") => {
             let t = std::time::Instant::now();
-            match beayy_sync::sync_once(&root, &local_device()) {
+            let r = beayy_sync::sync_once(&root, &local_device());
+            // 和 app 里每轮一样：头像名字、跟着账号走的设置一起对一遍
+            pull_profile();
+            sync_settings();
+            match r {
                 Some(r) => Ok(format!("上传 {}，下载 {}，{:.1} 秒{}", r.uploaded, r.downloaded, t.elapsed().as_secs_f64(), if r.errors.is_empty() { String::new() } else { format!("；出错：{}", r.errors.join("；")) })),
                 None => Err("没开同步".into()),
             }

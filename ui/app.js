@@ -866,6 +866,18 @@ function placeDialog(v) {
 
 const S = { days: [], status: null, page: "today", rules: null, settings: null, draft: null };
 
+/** 设置有一部分跟着账号同步（sync.rs 的 SHARED）：别的设备改了、这台同步下来以后，窗口回到前台时重读一次，侧栏跟着变 */
+window.addEventListener("focus", async () => {
+  if (!TAURI || !S.settings || document.querySelector(".dlg-root")) return;
+  try {
+    const s = await call("get_settings");
+    if (JSON.stringify(s) === JSON.stringify(S.settings)) return;
+    S.settings = s; S.draft = JSON.parse(JSON.stringify(s));
+    renderSide();
+    if (S.page === "settings") renderSettings();
+  } catch (e) {}
+});
+
 async function boot() {
   [S.days, S.status, S.sync, S.profile] = await Promise.all([call("list_days"), call("get_status"), call("sync_status").catch(() => ({})), call("get_profile").catch(() => ({ name: tr("我") }))]);
   renderSide();
@@ -951,10 +963,11 @@ function noteList(notes) {
   return items.length > 1 ? `<ol class="up-notes">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : `<p class="up-notes">${esc(items[0])}</p>`;
 }
 
-/** 新版本下好了：开着窗口就弹一次。「稍后」这一版 24 小时内不再弹（菜单和设置里照样能点），换了新版本照弹 */
+/** 新版本下好了：开着窗口就弹一次。「稍后」这一版 24 小时内不再弹（菜单和设置里照样能点），换了新版本照弹；
+ *  设置 → 通用 → 关于 关了「新版本弹窗提醒」就不弹，只在头像上挂点 */
 function updatePrompt() {
   const u = S.update || {};
-  if (!u.newer || !u.ready || u.updatable || (S.status && S.status.mobile) || DLG || (S.settings && !S.settings.onboarded)) return;
+  if (!u.newer || !u.ready || u.updatable || (S.status && S.status.mobile) || DLG || (S.settings && (!S.settings.onboarded || S.settings.update_prompt === false))) return;
   let later = {};
   try { later = JSON.parse(localStorage.getItem("update-later") || "{}"); } catch (e) {}
   if (later.v === u.latest && Date.now() < later.until) return;
@@ -1007,7 +1020,9 @@ function aboutSection() {
   const u = S.update || {}, st = S.status || {};
   const state = upState(u);
   const btn = u.newer && u.ready && !u.updatable ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-go">${tr("重启更新")}</button>` : `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="up-check" ${upBusy(u) ? "disabled" : ""}>${tr("检查更新")}</button>`;
-  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本")}</div><div class="mx-setting-desc">${esc(u.current || st.version || "")} · <span id="up-state">${esc(state)}</span></div>${u.newer && upNotes(u) ? `<div class="mx-setting-desc">${esc(upNotes(u))}</div>` : ""}</div>${TAURI ? btn : ""}</div>`);
+  const prompt = !(S.settings && S.settings.update_prompt === false);
+  return section(tr("关于"), `<div class="mx-setting"><div class="mx-setting-main"><div class="mx-setting-name">${tr("版本")}</div><div class="mx-setting-desc">${esc(u.current || st.version || "")} · <span id="up-state">${esc(state)}</span></div>${u.newer && upNotes(u) ? `<div class="mx-setting-desc">${esc(upNotes(u))}</div>` : ""}</div>${TAURI ? btn : ""}</div>`
+    + setRow(tr("新版本弹窗提醒"), tr("关了只在头像上挂一个点"), `<button class="mx-switch" role="switch" id="up-prompt" aria-checked="${prompt}" aria-label="${tr("新版本弹窗提醒")}"></button>`));
 }
 
 function bindAbout() {
@@ -1019,6 +1034,8 @@ function bindAbout() {
   };
   const g = document.getElementById("up-go");
   if (g) g.onclick = applyUpdate;
+  const p = document.getElementById("up-prompt");
+  if (p) p.onclick = async () => { await saveSome({ update_prompt: S.settings.update_prompt === false }); renderSettings(); };
   pollUpdate();
 }
 

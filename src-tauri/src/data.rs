@@ -1509,6 +1509,8 @@ pub fn get_settings() -> Value {
         "games": s.get("games").and_then(Value::as_bool).unwrap_or(false),
         "games_lol": s.get("games_lol").and_then(Value::as_bool).unwrap_or(true),
         "games_steam": s.get("games_steam").and_then(Value::as_bool).unwrap_or(true),
+        // 设置 → 通用 → 关于：新版本下好了弹窗提醒，默认开；关了只在头像上挂点
+        "update_prompt": s.get("update_prompt").and_then(Value::as_bool).unwrap_or(true),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
             Some(Value::Bool(true)) => "medium",
@@ -1521,9 +1523,15 @@ pub fn get_settings() -> Value {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam"), ("update_prompt", "update_prompt")];
+    let now = Utc::now().timestamp_millis();
+    let mut at = s.get("settings_at").and_then(Value::as_object).cloned().unwrap_or_default();
     for (from, to) in map {
         if let Some(mut v) = settings.get(from).cloned() {
+            // 跟着账号走的那几项：值变了记下时刻，同步时新的为准（见 sync.rs 的 sync_settings）
+            if crate::sync::SHARED.contains(&to) && s.get(to) != Some(&v) {
+                at.insert(to.into(), json!(now));
+            }
             // 同步服务器、转写服务填的就是官方的，存成空（官方地址以后变了跟着变）
             if (from == "sync_server" && v.as_str().map(|x| x.trim_end_matches('/')) == Some(beayy_sync::DEFAULT_SERVER))
                 || (from == "transcribe_server" && v.as_str().map(|x| x.trim_end_matches('/')) == Some(beayy_core::DEFAULT_TRANSCRIBE))
@@ -1533,6 +1541,13 @@ pub fn save_settings(settings: Value) -> Result<(), String> {
             s.insert(to.into(), v);
         }
     }
+    if !at.is_empty() {
+        s.insert("settings_at".into(), Value::Object(at));
+    }
+    write_settings_raw(s)
+}
+
+pub(crate) fn write_settings_raw(s: Map<String, Value>) -> Result<(), String> {
     fs::create_dir_all(default_root()).map_err(|e| e.to_string())?;
     fs::write(settings_path(), serde_json::to_string_pretty(&Value::Object(s)).unwrap()).map_err(|e| e.to_string())
 }
