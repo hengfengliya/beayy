@@ -36,6 +36,20 @@ pub struct CGPoint {
     pub y: f64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CGRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+pub const kCFNumberSInt32Type: CFIndex = 3;
+pub const kCFNumberFloat64Type: CFIndex = 6;
+pub const kCGWindowListOptionOnScreenOnly: u32 = 1 << 0;
+pub const kCGWindowListExcludeDesktopElements: u32 = 1 << 4;
+
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     pub static kCFRunLoopDefaultMode: CFStringRef;
@@ -59,6 +73,8 @@ extern "C" {
         used: *mut CFIndex,
     ) -> CFIndex;
     pub fn CFArrayGetCount(a: CFTypeRef) -> CFIndex;
+    pub fn CFDictionaryGetValue(d: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
+    pub fn CFNumberGetValue(n: CFTypeRef, ty: CFIndex, out: *mut c_void) -> Boolean;
     pub fn CFArrayGetValueAtIndex(a: CFTypeRef, i: CFIndex) -> CFTypeRef;
     pub fn CFURLGetString(url: CFTypeRef) -> CFStringRef;
     pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
@@ -114,6 +130,11 @@ extern "C" {
     pub fn CGEventKeyboardGetUnicodeString(e: CGEventRef, max: usize, actual: *mut usize, buf: *mut u16);
     /// state 0＝combinedSessionState，type !0＝任意输入
     pub fn CGEventSourceSecondsSinceLastEventType(state: i32, ty: u32) -> f64;
+    pub static kCGWindowOwnerPID: CFStringRef;
+    pub static kCGWindowBounds: CFStringRef;
+    pub static kCGWindowAlpha: CFStringRef;
+    pub fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> CFTypeRef;
+    pub fn CGRectMakeWithDictionaryRepresentation(dict: CFTypeRef, rect: *mut CGRect) -> bool;
 }
 
 pub type AXObserverCallback = extern "C" fn(AXObserverRef, AXUIElementRef, CFStringRef, *mut c_void);

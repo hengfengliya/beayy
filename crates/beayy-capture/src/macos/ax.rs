@@ -98,6 +98,42 @@ pub fn app_info(pid: Pid) -> Map<String, Value> {
     m
 }
 
+/// 屏幕上这个点最上层的窗口属于哪个进程（按窗口服务器的前后顺序找第一个盖住它的可见窗口）。
+/// 只问窗口服务器，不碰任何 app 的界面对象，哪个线程调都安全。找不到返回 None。
+pub fn window_owner_at(x: f64, y: f64) -> Option<Pid> {
+    let list = CF::owned(unsafe { CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, 0) })?;
+    let n = unsafe { CFArrayGetCount(list.ptr()) };
+    for i in 0..n {
+        let d = unsafe { CFArrayGetValueAtIndex(list.ptr(), i) };
+        if d.is_null() {
+            continue;
+        }
+        let mut alpha = 1.0f64;
+        let a = unsafe { CFDictionaryGetValue(d, kCGWindowAlpha) };
+        if !a.is_null() {
+            unsafe { CFNumberGetValue(a, kCFNumberFloat64Type, &mut alpha as *mut f64 as *mut _) };
+        }
+        if alpha <= 0.0 {
+            continue;
+        }
+        let b = unsafe { CFDictionaryGetValue(d, kCGWindowBounds) };
+        let mut r = CGRect::default();
+        if b.is_null() || !unsafe { CGRectMakeWithDictionaryRepresentation(b, &mut r) } {
+            continue;
+        }
+        if x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h {
+            continue;
+        }
+        let p = unsafe { CFDictionaryGetValue(d, kCGWindowOwnerPID) };
+        let mut pid: i32 = 0;
+        if p.is_null() || unsafe { CFNumberGetValue(p, kCFNumberSInt32Type, &mut pid as *mut i32 as *mut _) } == 0 {
+            return None;
+        }
+        return Some(pid as Pid);
+    }
+    None
+}
+
 /// 前台 app 的进程号和 bundle id
 pub fn frontmost() -> Option<(Pid, String)> {
     objc2::rc::autoreleasepool(|_| {

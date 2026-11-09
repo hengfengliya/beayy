@@ -253,6 +253,15 @@ fn spawn_worker(log: Arc<EventLog>, me: Handle) -> Sender<Work> {
                 objc2::rc::autoreleasepool(|_| match w {
                     Work::Click { button, x, y, actor } => {
                         let mut f = fields! {"button" => button, "x" => num(x), "y" => num(y), "actor" => actor};
+                        // 点在 Beayy 自己的窗口上（含系统给它弹的拼写纠正框）：不按坐标取元素。
+                        // 系统级按坐标取元素落到本进程时会在这条线程里直接跑 AppKit 的无障碍代码，
+                        // 和主线程同时碰界面对象就崩（0.2.61 用户报告：在 Beayy 输入框打字弹出拼写纠正框时点击，SIGSEGV）。
+                        let me_pid = std::process::id() as Pid;
+                        if window_owner_at(x, y) == Some(me_pid) || frontmost().map(|(p, _)| p) == Some(me_pid) {
+                            merge(&mut f, app_info(me_pid));
+                            log.write("mouse.click", f, None);
+                            return;
+                        }
                         let sys = CF::owned(unsafe { AXUIElementCreateSystemWide() });
                         let mut hit: AXUIElementRef = std::ptr::null();
                         let ok = sys.as_ref().map(|s| unsafe { AXUIElementCopyElementAtPosition(s.ptr(), x as f32, y as f32, &mut hit) } == kAXErrorSuccess).unwrap_or(false);
