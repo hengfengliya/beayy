@@ -108,6 +108,8 @@ pub struct Activity {
 
 pub struct Summarizer {
     pub root: PathBuf,
+    /// 设置页预览用：还没存的「摘要关注点」「总结写法」和它们的自定义段草稿，盖过 settings.json 里的
+    drafts: HashMap<&'static str, Value>,
 }
 
 fn seg_start(name: &str) -> DateTime<Utc> {
@@ -231,7 +233,80 @@ fn py_round(x: f64) -> i64 {
 
 impl Summarizer {
     pub fn new(root: PathBuf) -> Self {
-        Summarizer { root }
+        Summarizer { root, drafts: HashMap::new() }
+    }
+
+    /// 用没存的草稿问模型（设置页预览）：key 是 summary_focus、summary_style（文字）或 summary_focus_section、summary_style_section（{title, ask}）
+    pub fn with_draft(mut self, key: &'static str, v: Value) -> Self {
+        self.drafts.insert(key, v);
+        self
+    }
+
+    fn setting(&self, key: &str) -> Value {
+        self.drafts.get(key).cloned().unwrap_or_else(|| self.raw_settings().get(key).cloned().unwrap_or(Value::Null))
+    }
+
+    /// 自定义段（设置 → AI，摘要和总结各一个）：（栏目名，这一栏写什么）；没起名就没有。
+    /// 10 分钟摘要用 summary_focus_section，日、周、月总结用 summary_style_section
+    pub fn section(&self, kind: &str) -> Option<(String, String)> {
+        let key = match kind {
+            "segment" => "summary_focus_section",
+            "daily" | "weekly" | "monthly" => "summary_style_section",
+            _ => return None,
+        };
+        let v = self.setting(key);
+        let title = section_title(v["title"].as_str().unwrap_or(""));
+        (!title.is_empty()).then(|| (title, v["ask"].as_str().unwrap_or("").trim().to_string()))
+    }
+
+    /// 用户自己写的要求（设置 → AI）：摘要关注点管 10 分钟和小时摘要，总结写法管日、周、月总结；草稿优先。
+    /// 有自定义段的再要模型多给一个 custom 字段
+    fn custom_note(&self, kind: &str) -> String {
+        let (key, head) = match kind {
+            "segment" | "hourly" => ("summary_focus", FOCUS_HEAD),
+            "daily" | "weekly" | "monthly" => ("summary_style", STYLE_HEAD),
+            _ => return String::new(),
+        };
+        let text = self.setting(key).as_str().unwrap_or("").trim().to_string();
+        let mut out = if text.is_empty() { String::new() } else { format!("\n{head}\n{text}\n") };
+        if let Some((title, ask)) = self.section(kind) {
+            let ask = if ask.is_empty() { String::new() } else { format!("：{ask}") };
+            out += &SECTION_NOTE.replace("{title}", &title).replace("{ask}", &ask);
+        }
+        out
+    }
+
+    /// 总结里的自定义段：「\n## 栏目名\n\n- …\n」，模型没给或没设就是空的
+    pub fn section_md(&self, kind: &str, j: &Map<String, Value>) -> String {
+        let Some((title, _)) = self.section(kind) else { return String::new() };
+        let items = custom_items(j);
+        if items.is_empty() { String::new() } else { format!("\n## {title}\n\n{}\n", items.iter().map(|x| format!("- {x}")).collect::<Vec<_>>().join("\n")) }
+    }
+
+    /// 摘要关注点预览：拿本机最近一份有内容的摘要，按同样的时段和材料、用现在的设置（含草稿）重问一次模型，不写文件。
+    /// 返回（原来那份 Markdown，新的 Markdown，起时刻，分钟数）
+    pub fn preview_segment(&self) -> Result<(String, String, DateTime<Utc>, i64), String> {
+        let names = self.segment_names();
+        let known = self.known_projects();
+        for p in read_dir_sorted(&self.out_dir()).into_iter().rev().take(80) {
+            let f = p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+            let (Some(mins), Ok(start)) = (summary_minutes(&f), NaiveDateTime::parse_from_str(f.get(..19).unwrap_or(""), "%Y-%m-%dT%H-%M-%S")) else { continue };
+            let start = start.and_utc();
+            let old = fs::read_to_string(&p).unwrap_or_default();
+            if old.contains(&format!("title: {IDLE_TITLE}\n")) {
+                continue;
+            }
+            let segs: Vec<String> = names.iter().filter(|n| seg_start(n) >= start && seg_start(n) < start + Duration::minutes(mins)).cloned().collect();
+            let mut events: Vec<Ev> = segs.iter().flat_map(|n| self.load_own(n)).collect();
+            if segs.is_empty() || is_idle(&events) || !events.iter().any(|e| !NOISE.contains(&ty(e))) {
+                continue;
+            }
+            events.sort_by_key(ts);
+            let (pack, apps, active) = self.build_pack(&segs[0], &events, &names, mins);
+            let (j, _) = self.call_model(&pack, &self.prior_summary(&segs[0], &names), &known, mins)?;
+            return Ok((old, self.render(&segs, &j, &apps, active), start, mins));
+        }
+        Err("还没有能拿来预览的摘要，记录一会儿再试".into())
     }
 
     fn devices(&self) -> PathBuf {
@@ -841,10 +916,11 @@ impl Summarizer {
             (format!("{}/chat/completions", gateway.trim_end_matches('/')), format!("Bearer {}", api_key()?))
         };
         // AI 总结的语言（设置 → 通用）：给人看的那几种（10 分钟摘要、小时摘要、日周月总结）照设置写；项目名归并、打标签这些内部用的不管
+        let system = format!("{system}{}", self.custom_note(kind));
         let system = if self.out_lang() == "en" && ["segment", "hourly", "daily", "weekly", "monthly"].contains(&kind) {
             format!("{system}\n{EN_NOTE}")
         } else {
-            system.to_string()
+            system
         };
         let body = json!({"model": model, "temperature": temperature, "messages": [
             {"role": "system", "content": system}, {"role": "user", "content": user}]});
@@ -984,6 +1060,16 @@ impl Summarizer {
                 md.push(format!("- {}", one(Some(&b))));
             }
             md.push(String::new());
+        }
+        // 自定义段：栏目名写进标题（以后改名不影响写过的）
+        if let Some((title, _)) = self.section("segment") {
+            let items = custom_items(j);
+            if !items.is_empty() {
+                md.push(format!("## {SECTION_MARK}{title}"));
+                md.push(String::new());
+                md.extend(items.iter().map(|x| format!("- {x}")));
+                md.push(String::new());
+            }
         }
         md.push("## Citations".into());
         md.push(String::new());
@@ -1205,6 +1291,37 @@ const ACTIVITY_GUIDE: &str = "    activity 只能填下面的二级类型（如�
 
 /// 总结用英文写时接在提示词后面：规定只能填中文选项的字段照原样，给人看的文字都用英文
 const EN_NOTE: &str = "输出语言：英文（这一条优先于上面「全部用中文」的要求）。JSON 的字段名，以及 activity、domain 这类规定只能从中文选项里选的字段，照原样填中文；project 照「已有的项目名」的写法。除此之外所有给人看的文字（标题、描述、经过、线索、一句话、点评、做成了什么、偏离、明天等）都用英文（English）写，对用户用 you。引文用英文原文或通行英译，出处也写英文。";
+
+/// 接在用户自己写的要求前面：只调侧重和写法，JSON 字段、选项照上面的规定，免得下游（时间统计、总结页）读不出来
+const FOCUS_HEAD: &str = "用户另外的关注点（写摘要时照这个多留、写细；JSON 字段、格式和 parts 的判法照上面的规定不变，冲突时以上面为准；没有相关内容就不写，不编造）：";
+/// 有自定义段时接在最后：要模型多给一个 custom 字段
+const SECTION_NOTE: &str = "\n另外在 JSON 里多加一个字段 custom：0–6 条字符串的数组，是用户要单独列出的一栏「{title}」{ask}。材料里没有相关内容就返回空数组 []，不编造，也不要和其他字段重复照抄。\n";
+/// 10 分钟摘要文件里自定义段的标题前缀（## Custom: 栏目名）
+const SECTION_MARK: &str = "Custom: ";
+/// 总结里已有的段名：自定义段不能和它们同名，免得页面认错
+const FIXED_TITLES: &[&str] = &["今天的一句话", "这周的一句话", "这个月的一句话", "点评", "时间都去哪了", "时间和作息", "做成了什么", "规矩", "偏离", "棒喝", "明天", "下周", "下个月"];
+
+/// 栏目名：去掉 #、换行，最多 20 字；和固定段同名的后面加「（自定义）」
+pub fn section_title(raw: &str) -> String {
+    let t: String = raw.replace(['#', '\n', '\r'], " ").trim().chars().take(20).collect();
+    if FIXED_TITLES.contains(&t.as_str()) { format!("{t}（自定义）") } else { t }
+}
+
+/// 模型给的 custom 字段：去空、去掉开头的「- 」
+pub fn custom_items(j: &Map<String, Value>) -> Vec<String> {
+    j.get("custom").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str)
+        .map(|x| x.trim().trim_start_matches("- ").split_whitespace().collect::<Vec<_>>().join(" ")).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
+}
+
+/// 10 分钟摘要 Markdown 里的自定义段：（栏目名，条目）
+pub fn custom_of(md: &str) -> Option<(String, Vec<String>)> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?ms)^## Custom: ([^\n]+)\n+(.*?)(?:\n## |\z)").unwrap());
+    let c = RE.captures(md)?;
+    let items: Vec<String> = c[2].lines().filter_map(|l| l.strip_prefix("- ")).map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+    (!items.is_empty()).then(|| (c[1].trim().to_string(), items))
+}
+
+const STYLE_HEAD: &str = "用户要的写法（照这个调整各字段的侧重、语气和详略；JSON 字段名和格式照上面的规定不变，用户不要的字段返回空字符串或空数组；只写材料里有的事，不编造）：";
 
 const ROLLUP_PROMPT: &str = "你是电脑活动记录员。下面是用户电脑上一个小时里分段写的摘要（每行是一段的起止时刻、标题和概括）。请把它们合成这一小时的摘要，全部用中文，用第二人称「你」。
 只写摘要里有的事，不编造，不要写「材料未显示」这类话，不写具体分钟数。
@@ -1760,6 +1877,25 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         assert!(!act.spans.is_empty(), "没算出在电脑前的时间");
         assert_eq!(act.windows.first().map(|w| w.2.as_str()), Some("msedge"));
+    }
+
+    /// 自定义段：栏目名清洗、提示词只接在 10 分钟摘要上、写进摘要文件再读回来
+    #[test]
+    fn custom_section() {
+        assert_eq!(section_title(" ## 想法\n "), "想法");
+        assert_eq!(section_title("偏离"), "偏离（自定义）");
+        let root = std::env::temp_dir().join(format!("beayy-custom-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let s = Summarizer::new(root.clone()).with_draft("summary_focus_section", json!({"title": "想法", "ask": "我提出的想法"}));
+        assert!(s.custom_note("segment").contains("「想法」：我提出的想法"));
+        assert!(s.custom_note("hourly").is_empty(), "小时摘要不要自定义段");
+        let j: Map<String, Value> = serde_json::from_value(json!({"title": "t", "recording": [{"heading": "h", "bullets": ["b"]}], "custom": ["- 做个 A", " ", "换成 B"]})).unwrap();
+        let md = s.render(&["2026-10-16T06-00-00Z".into()], &j, &[], 60);
+        assert_eq!(custom_of(&md), Some(("想法".into(), vec!["做个 A".into(), "换成 B".into()])));
+        assert!(md.contains("- b\n\n## Custom: 想法\n\n- 做个 A\n- 换成 B\n\n## Citations"), "{md}");
+        assert!(Summarizer::new(root.clone()).section("segment").is_none(), "没设就没有");
+        assert_eq!(s.section_md("daily", &j), "", "总结用的是另一个设置");
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// 摘要间隔 30 分钟：同一个间隔的分段并成一份，文件名写管多长；间隔中途改的，从第一段没写的写到间隔结束

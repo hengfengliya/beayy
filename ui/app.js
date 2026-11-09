@@ -336,11 +336,11 @@ let DLG = null;
 /** title、body（HTML）、ok（主按钮文字）、okClass（primary／danger）、busy（提交中的按钮文字）、cancel（false＝不要取消钮）、
  *  closable（false＝只能点主按钮关）、submit(el)：抛错就把错写在窗口里、不关，返回 false 也不关；onOpen(el, d) 绑窗口里的交互；
  *  onClose()：窗口关掉时（取消、Esc、点遮罩、换页、提交成功）调 */
-function openDialog({ title, body, ok, okClass = "primary", busy, cancel = tr("取消"), closable = true, submit, onOpen, onClose }) {
+function openDialog({ title, body, ok, okClass = "primary", busy, cancel = tr("取消"), closable = true, submit, onOpen, onClose, wide = false }) {
   closeDialog();
   const root = document.createElement("div");
   root.className = "mx-scrim dlg-root";
-  root.innerHTML = `<div class="mx-dialog mx-dialog--sm" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+  root.innerHTML = `<div class="mx-dialog mx-dialog--sm${wide ? " dlg-wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
     <div class="mx-dialog-head"><h2 id="dlg-title">${esc(title)}</h2>${closable ? `<button class="mx-iconbtn" data-dlg="close" aria-label="${tr("关闭")}">${ICON.close}</button>` : ""}</div>
     <div class="mx-dialog-body">${body}<div class="mx-field-error" data-dlg="err" hidden></div></div>
     <div class="mx-dialog-foot">${cancel ? `<button class="mx-btn mx-btn--secondary" data-dlg="close">${esc(cancel)}</button>` : ""}${ok ? `<button class="mx-btn mx-btn--${okClass}" data-dlg="ok">${esc(ok)}</button>` : ""}</div></div>`;
@@ -1679,6 +1679,7 @@ function tlRow(x) {
   const more = [
     ctx.length ? `<div><p class="more-k">${tr("涉及")}</p>${md(ctx.map((y) => "- " + y).join("\n"))}</div>` : "",
     s.recording ? `<div><p class="more-k">${tr("经过")}</p>${md(s.recording)}</div>` : s.memory ? `<div><p class="more-k">${tr("经过")}</p>${md(s.memory)}</div>` : "",
+    s.custom ? `<div><p class="more-k">${esc(s.custom.title)}</p>${md(s.custom.items.map((y) => "- " + y).join("\n"))}</div>` : "",
   ].join("");
   const tag = (s.kind === "6h" ? `<span class="mx-tag">${tr("6 小时")}</span>` : s.source === "codex" ? `<span class="mx-tag">Codex</span>` : "")
     + (s.device ? `<span class="mx-tag">${esc(devLabel(s.device))}</span>` : "");
@@ -3734,8 +3735,111 @@ function aiBody(cf, st) {
   const seg = (id, list, cur) => `<div class="mx-seg" role="tablist" id="${id}">${list.map(([k, v]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "is-on" : ""}" data-v="${k}">${v}</button>`).join("")}</div>`;
   return section(tr("总结"), setRow(tr("模型"), model, `<span class="btns">${mobile ? "" : `<button class="mx-btn mx-btn--text mx-btn--sm" id="c-usage">${tr("用量")}</button>`}${login}${smallBtn("c-model", tr("更改"))}</span>`)
       + setRow(tr("语言"), "", seg("sum-lang", SUM_LANGS, cf.summary_language || ""))
-      + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), seg("roast", ROASTS, cf.roast || "off")))
+      + setRow(tr("棒喝"), tr("日总结、周总结多一段狠话，low 不带脏字"), seg("roast", ROASTS, cf.roast || "off"))
+      + (mobile ? "" : setRow(tr("摘要关注点"), tuneDesc("focus"), smallBtn("c-focus", tr("更改"))) + setRow(tr("总结写法"), tuneDesc("style"), smallBtn("c-style", tr("更改")))))
     + (mobile ? "" : section(tr("连接"), setRow(tr("本机 AI 工具"), tr("Claude、Cursor 能读你的记录，只读，数据不出这台电脑"), smallBtn("c-mcp", tr("接入方法")))));
+}
+
+// ---------- 摘要关注点、总结写法（设置 → AI）：选模板或自己写、让 AI 改写、拿自己的记录预览 ----------
+
+/** 模板：名字、要求（接在给模型的提示词后面，见 beayy_summary 的 custom_note；括号里是字段名，模型认得）、自定义段（单独一栏：栏目名、写什么） */
+const FOCUS_TPLS = [
+  { name: "想法与决定", text: "- 我自己打字提出的想法、观点、问题，尽量保留原话，写进经过（recording）\n- 讨论里形成的结论和做出的决定：定了什么、为什么", title: "想法", ask: "我自己提出的想法、点子和问题，尽量用原话，一条一个" },
+  { name: "开发", text: "- 改了哪些代码：仓库、文件、功能\n- 遇到的报错和问题，最后怎么解决的；技术取舍的理由", title: "未解决", ask: "还没解决的问题和报错，写清卡在哪" },
+  { name: "学习", text: "- 新学到的知识点，一两句话写清是什么\n- 读的书、文章、课程的名字和读到哪", title: "疑问", ask: "没看懂、没想通的问题，照原样记下" },
+  { name: "沟通与待办", text: "- 和谁沟通、谈了什么、对方要什么、我答应了什么", title: "待办", ask: "答应别人的和自己要做的事，有截止时间的写上" },
+];
+const STYLE_TPLS = [
+  { name: "工作日报", text: "- 不要引言和点评（quote、source、remark 留空）\n- 一句话写这段时间最主要的产出\n- 做成了什么按项目分，写完成了什么、推进到哪\n- 偏离写遇到的问题和阻碍\n- 下一步写具体动作", title: "待跟进", ask: "等别人回复、要我跟进的事，写清找谁、什么事" },
+  { name: "成长复盘", text: "- 点评不引名言（quote、source 留空），写这段时间最值得反思的一点：做了什么决定、背后的判断、下次怎么做\n- 做成了什么里也写新的收获，不只是完成的任务\n- 偏离写反复出现的习惯问题\n- 下一步写一个具体的改进动作", title: "新想法", ask: "这段时间冒出来的新想法和点子，尽量用原话" },
+  { name: "客观记录", text: "- 只写发生了什么，不评价、不建议\n- 不要引言、点评和下一步（quote、source、remark 和明天、下周、下个月的那一项都留空）\n- 一句话用平实的话概括\n- 做成了什么按时间顺序列主要的事", title: "", ask: "" },
+];
+const TUNE = {
+  focus: { key: "summary_focus", title: "摘要关注点", tpls: FOCUS_TPLS, cmd: "preview_focus",
+    ph: "用自己的话写想多记什么，比如「我提出的想法记原话」", note: "只影响以后写的摘要。预览会问一次模型。" },
+  style: { key: "summary_style", title: "总结写法", tpls: STYLE_TPLS, cmd: "preview_style",
+    ph: "用自己的话写想要什么样的总结，比如「像工作日报，不要名言」", note: "日、周、月总结共用，只影响以后写的总结。预览会问一次模型。" },
+};
+/** 要求和自定义段跟某个模板一样没有（中英文两种写法都认） */
+const tplIs = (x, text, title) => (tr(x.text) === text || x.text === text) && (tr(x.title) === title || x.title === title);
+/** 现在用的是哪个：默认／某个模板／自定义 */
+function tuneDesc(kind) {
+  const T = TUNE[kind], cf = S.settings || {}, text = (cf[T.key] || "").trim(), title = ((cf[T.key + "_section"] || {}).title || "").trim();
+  if (!text && !title) return tr("默认");
+  const hit = T.tpls.find((x) => tplIs(x, text, title));
+  return hit ? tr(hit.name) : tr("自定义");
+}
+/** 预览里的一份摘要：标题、概括、涉及、经过（和时间线展开后一样） */
+const tuneSeg = (s) => `<p class="tn-title">${esc(s.title || tr("（没有标题）"))}</p>${s.description ? `<p class="tn-desc">${esc(s.description)}</p>` : ""}`
+  + (s.context.length ? `<p class="more-k">${tr("涉及")}</p>${md(s.context.map((y) => "- " + y).join("\n"))}` : "")
+  + (s.recording ? `<p class="more-k">${tr("经过")}</p>${md(s.recording)}` : "")
+  + (s.custom ? `<p class="more-k">${esc(s.custom.title)}</p>${md(s.custom.items.map((y) => "- " + y).join("\n"))}` : "");
+/** 预览里的一份日总结：一句话、点评、叙述段（时长、规矩由代码算，和写法无关，不列） */
+function tuneSum(text) {
+  if (!text) return `<p class="note">${tr("这天还没有日总结")}</p>`;
+  const parts = splitSummary(text).parts.filter((p) => !["时间都去哪了", "规矩", "棒喝"].includes(p.title));
+  const one = parts.find((p) => p.title === "今天的一句话"), rm = parts.find((p) => p.title === "点评");
+  return (one && one.body ? `<p class="lead"><span class="crayon">“${esc(one.body.replace(/^[“"]|[”"]$/g, ""))}”</span></p>` : "")
+    + (rm && rm.body ? remarkHtml(rm.body) : "") + story(parts.filter((p) => p !== one && p !== rm && p.body));
+}
+function tuneDialog(kind) {
+  const T = TUNE[kind], cur = S.settings[T.key] || "", sec = S.settings[T.key + "_section"] || {};
+  const tpls = [{ name: "", text: "", title: "", ask: "" }, ...T.tpls];
+  const body = `<div class="mx-seg" role="tablist" id="tn-tpl">${tpls.map((x, i) => `<button role="tab" data-i="${i}">${i ? esc(tr(x.name)) : tr("默认")}</button>`).join("")}</div>
+    <textarea class="mx-input dlg-ta tn-ta" id="tn-text" placeholder="${esc(tr(T.ph))}" aria-label="${esc(tr(T.title))}">${esc(cur)}</textarea>
+    <div class="mx-field"><label for="tn-sec-title">${tr("单独一栏")}</label><div class="tn-sec">
+      <input class="mx-input" id="tn-sec-title" maxlength="20" placeholder="${esc(tr("栏目名，比如「想法」"))}" value="${esc(sec.title || "")}">
+      <input class="mx-input" id="tn-sec-ask" placeholder="${esc(tr("这一栏写什么"))}" aria-label="${esc(tr("这一栏写什么"))}" value="${esc(sec.ask || "")}"></div></div>
+    <div class="tn-acts"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="tn-ai">${tr("AI 改写")}</button><button class="mx-btn mx-btn--secondary mx-btn--sm" id="tn-pre">${tr("预览")}</button><span class="note" id="tn-state"></span></div>
+    <p class="note">${tr(T.note)}</p>
+    <div class="tn-out" id="tn-out" hidden></div>`;
+  openDialog({
+    title: tr(T.title), body, ok: tr("保存"), wide: true,
+    submit: async (el) => {
+      const v = (id) => el.querySelector("#" + id).value.trim();
+      await saveSome({ [T.key]: v("tn-text"), [T.key + "_section"]: { title: v("tn-sec-title"), ask: v("tn-sec-title") ? v("tn-sec-ask") : "" } });
+      renderSettings();
+    },
+    onOpen: (el, d) => {
+      const $ = (id) => el.querySelector("#" + id), ta = $("tn-text"), st = $("tn-sec-title"), sa = $("tn-sec-ask");
+      const section = () => ({ title: st.value.trim(), ask: sa.value.trim() });
+      const mark = () => {
+        const v = ta.value.trim(), t = st.value.trim();
+        el.querySelectorAll("#tn-tpl button").forEach((b) => { const x = tpls[+b.dataset.i]; const on = x.name ? tplIs(x, v, t) : !v && !t; b.classList.toggle("is-on", on); b.setAttribute("aria-selected", on); });
+      };
+      mark();
+      ta.oninput = st.oninput = mark;
+      $("tn-tpl").onclick = (e) => {
+        const b = e.target.closest("[data-i]"); if (!b) return;
+        const x = tpls[+b.dataset.i];
+        ta.value = x.text ? tr(x.text) : ""; st.value = x.title ? tr(x.title) : ""; sa.value = x.ask ? tr(x.ask) : "";
+        mark();
+      };
+      // 两个按钮都要等模型：等的时候都不能点，旁边写在做什么
+      const busy = async (label, f) => {
+        $("tn-ai").disabled = $("tn-pre").disabled = true; $("tn-state").textContent = label; d.setErr(null);
+        try { await f(); } catch (x) { if (DLG === d) d.setErr(trMsg(String(x && x.message ? x.message : x))); }
+        if (DLG !== d) return;
+        $("tn-ai").disabled = $("tn-pre").disabled = false; $("tn-state").textContent = "";
+      };
+      $("tn-ai").onclick = () => busy(tr("在改写…"), async () => {
+        const out = await call("ai_write_note", { kind, wish: ta.value });
+        if (DLG !== d) return;
+        ta.value = out.text;
+        if (out.title) { st.value = out.title; sa.value = out.ask; }
+        mark();
+      });
+      $("tn-pre").onclick = () => busy(tr("在用你的记录试写…"), async () => {
+        const r = await call(T.cmd, { text: ta.value, section: section() });
+        if (DLG !== d) return;
+        const [a, b] = kind === "focus" ? [tuneSeg(r.before), tuneSeg(r.after)] : [tuneSum(r.before), tuneSum(r.after)];
+        const src = kind === "focus" ? tr("用 {t} 的记录", { t: `${hm(r.start)}–${hm(r.end)}` }) : tr("用 {d} 的记录", { d: r.date.slice(5) });
+        const out = $("tn-out");
+        out.hidden = false;
+        out.innerHTML = `<p class="note">${src}</p><div class="tn-cols"><div><p class="more-k">${tr("现在")}</p>${a}</div><div><p class="more-k">${tr("改后")}</p>${b}</div></div>`;
+      });
+    },
+  });
 }
 
 /** 设置「手机与手表」页的服务：手表录音转文字、停留点取名用的地图（用官方的写本月用量） */
@@ -3875,6 +3979,8 @@ async function renderSettings() {
     segSave("sum-lang", "summary_language");
     segSave("roast", "roast");
     on("c-model", modelDialog);
+    on("c-focus", () => tuneDialog("focus"));
+    on("c-style", () => tuneDialog("style"));
     on("c-usage", usageDialog);
     on("c-mcp", mcpDialog);
     on("ac-login", officialLogin);

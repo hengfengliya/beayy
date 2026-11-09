@@ -694,6 +694,20 @@ fn day_input(date: NaiveDate) -> Result<DayInput, String> {
         user += &format!("规矩：\n{}\n\n", rules.iter().map(|(t, d, ok)| format!("- {t}：{d}{}", match ok { Some(true) => "，守住了", Some(false) => "，没守住", None => "" })).collect::<Vec<_>>().join("\n"));
     }
     user += &format!("每小时：\n{}\n\n最近：\n{}\n", hours.join("\n"), recent.join("\n"));
+    // 10 分钟摘要里单列的自定义段（设置 → AI → 摘要关注点）：小时摘要合并时会丢，原样给日总结
+    let custom: Vec<String> = day["segments"].as_array().cloned().unwrap_or_default().iter()
+        .filter_map(|s| {
+            let t = s["start"].as_str().and_then(|x| DateTime::parse_from_rfc3339(x).ok()).map(|t| t.with_timezone(&Local).format("%H:%M").to_string()).unwrap_or_default();
+            let c = s["custom"].as_object()?;
+            let title = c.get("title")?.as_str()?.to_string();
+            Some(c.get("items")?.as_array()?.iter().filter_map(Value::as_str).map(|x| format!("- {t}「{title}」{x}")).collect::<Vec<_>>())
+        })
+        .flatten()
+        .take(80)
+        .collect();
+    if !custom.is_empty() {
+        user += &format!("\n摘要里单列的内容：\n{}\n", custom.join("\n"));
+    }
     if let Some((_, rows)) = &places {
         user += &format!("\n去了哪：\n{}\n", rows.join("\n"));
     }
@@ -704,6 +718,15 @@ fn day_input(date: NaiveDate) -> Result<DayInput, String> {
 }
 
 fn write_day(date: NaiveDate) -> Result<String, String> {
+    let md = compose_day(date, &beayy_summary::Summarizer::new(default_root()), true)?;
+    let p = path_of(date);
+    fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::write(&p, &md).map_err(|e| e.to_string())?;
+    Ok(md)
+}
+
+/// 写出某天日总结的 Markdown，不存文件；roast＝false 不写棒喝（设置页预览写法时用，省一次模型）
+pub(crate) fn compose_day(date: NaiveDate, sm: &beayy_summary::Summarizer, roast: bool) -> Result<String, String> {
     let DayInput { mut user, stats, domains, acts, rules } = day_input(date)?;
     let material = user.clone();
     // 前后 7 天的点评引过的句子：别天天引同一句
@@ -713,9 +736,8 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
     if !used.is_empty() {
         user += &format!("\n前后几天的点评已经引过：\n- {}\n", used.join("\n- "));
     }
-    let sm = beayy_summary::Summarizer::new(default_root());
     let j = sm.ask_as("daily", PROMPT, &user)?;
-    let roast = roast_level().and_then(|lv| roast_day(&sm, date, &material, lv));
+    let roast = if roast { roast_level().and_then(|lv| roast_day(sm, date, &material, lv)) } else { None };
     let list = |k: &str| -> String {
         let v: Vec<String> = j.get(k).and_then(Value::as_array).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| format!("- {s}"))).collect();
         if v.is_empty() { "- 没有".into() } else { v.join("\n") }
@@ -737,6 +759,7 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
         md += &format!("\n为了什么：\n\n- {}\n\n在做什么：\n\n- {}\n", domains.join("\n- "), acts.join("\n- "));
     }
     md += &format!("\n## 做成了什么\n\n{}\n", list("done"));
+    md += &sm.section_md("daily", &j);
     if !rules.is_empty() {
         md += &format!("\n## 规矩\n\n{}\n", rules.iter().map(|(t, d, ok)| format!("- {} {t}：{d}", match ok { Some(true) => "✓", Some(false) => "✗", None => "·" })).collect::<Vec<_>>().join("\n"));
     }
@@ -746,9 +769,6 @@ fn write_day(date: NaiveDate) -> Result<String, String> {
         md += &format!("\n## 棒喝\n\n{r}\n");
     }
     md += &format!("\n## 明天\n\n{}\n", list("tomorrow"));
-    let p = path_of(date);
-    fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&p, &md).map_err(|e| e.to_string())?;
     Ok(md)
 }
 
@@ -846,6 +866,7 @@ fn write_week(monday: NaiveDate) -> Result<String, String> {
     if let Some(r) = &roast {
         md = md.replacen("\n## 下周\n", &format!("\n## 棒喝\n\n{r}\n\n## 下周\n"), 1);
     }
+    md = md.replacen("\n## 时间和作息\n", &format!("{}\n## 时间和作息\n", sm.section_md("weekly", &j)), 1);
     let p = week_path(monday);
     fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&p, &md).map_err(|e| e.to_string())?;
@@ -928,6 +949,7 @@ fn write_month(first: NaiveDate) -> Result<String, String> {
     if !remark.is_empty() {
         md = md.replacen("\n## 做成了什么\n", &format!("\n## 点评\n\n{remark}\n\n## 做成了什么\n"), 1);
     }
+    md = md.replacen("\n## 时间和作息\n", &format!("{}\n## 时间和作息\n", sm.section_md("monthly", &j)), 1);
     let p = month_path(first);
     fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
     fs::write(&p, &md).map_err(|e| e.to_string())?;

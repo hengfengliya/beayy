@@ -386,6 +386,8 @@ fn self_segments() -> HashMap<String, Vec<Value>> {
             "memory": mem_re.captures(&md).map(|c| c[1].trim().to_string()).unwrap_or_default(),
             "context": ctx,
             "recording": rec_re.captures(&md).map(|c| c[1].trim().to_string()).unwrap_or_default(),
+            // 自定义段（设置 → AI → 摘要关注点）：{title, items} 或 null
+            "custom": beayy_summary::custom_of(&md).map(|(title, items)| json!({"title": title, "items": items})),
         });
         if let Some((m, n)) = st {
             cache.insert(f.clone(), (m, n, date.clone(), seg.clone()));
@@ -1511,6 +1513,12 @@ pub fn get_settings() -> Value {
         "games_steam": s.get("games_steam").and_then(Value::as_bool).unwrap_or(true),
         // 设置 → 通用 → 关于：新版本下好了弹窗提醒，默认开；关了只在头像上挂点
         "update_prompt": s.get("update_prompt").and_then(Value::as_bool).unwrap_or(true),
+        // 设置 → AI：摘要关注点（10 分钟和小时摘要多留什么）、总结写法（日周月总结怎么写），空＝默认
+        "summary_focus": get("summary_focus", ""),
+        "summary_style": get("summary_style", ""),
+        // 自定义段：{title: 栏目名, ask: 这一栏写什么}，没起名＝不要
+        "summary_focus_section": s.get("summary_focus_section").cloned().unwrap_or(json!({"title": "", "ask": ""})),
+        "summary_style_section": s.get("summary_style_section").cloned().unwrap_or(json!({"title": "", "ask": ""})),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
             Some(Value::Bool(true)) => "medium",
@@ -1523,7 +1531,7 @@ pub fn get_settings() -> Value {
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam"), ("update_prompt", "update_prompt")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam"), ("update_prompt", "update_prompt"), ("summary_focus", "summary_focus"), ("summary_style", "summary_style"), ("summary_focus_section", "summary_focus_section"), ("summary_style_section", "summary_style_section")];
     let now = Utc::now().timestamp_millis();
     let mut at = s.get("settings_at").and_then(Value::as_object).cloned().unwrap_or_default();
     for (from, to) in map {
