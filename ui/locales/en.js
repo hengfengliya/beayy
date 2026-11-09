@@ -1762,5 +1762,16 @@ window.I18N_EN = {
   "这段时间冒出来的新想法和点子，尽量用原话": "New ideas and sparks from this period, in my own words where possible",
   "单独一栏": "Separate section",
   "栏目名，比如「想法」": "Section name, e.g. “Ideas”",
-  "这一栏写什么": "What goes in this section"
+  "这一栏写什么": "What goes in this section",
+  "{name}（我的）": "{name} (mine)",
+  "不加要求，照 Beayy 原来的写法。": "No extra instructions; Beayy's original style.",
+  "保存并使用": "Save and use",
+  "内置": "Built-in",
+  "删除这个模板？": "Delete this template?",
+  "在用": "In use",
+  "复制成我的模板": "Copy to my templates",
+  "我的模板 {n}": "My template {n}",
+  "新建模板": "New template",
+  "模板名": "Template name",
+  "我的模板": "My templates"
 };

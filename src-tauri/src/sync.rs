@@ -59,7 +59,7 @@ pub fn start(log: Arc<EventLog>) {
 
 /// 跟着账号走的设置；别的只存本机：模型和网关跟着本机的密钥，不记录的 app 写法分系统，同步方式、数据目录各台不同；
 /// 主题、语言、字体在网页的本机存储里
-pub const SHARED: [&str; 13] = ["summary_language", "roast", "summary_minutes", "games", "games_lol", "games_steam", "update_prompt", "map_provider", "speaker_name", "summary_focus", "summary_style", "summary_focus_section", "summary_style_section"];
+pub const SHARED: [&str; 17] = ["summary_language", "roast", "summary_minutes", "games", "games_lol", "games_steam", "update_prompt", "map_provider", "speaker_name", "summary_focus", "summary_style", "summary_focus_section", "summary_style_section", "summary_focus_pick", "summary_style_pick", "summary_focus_templates", "summary_style_templates"];
 
 /// 合并本机设置和账号上那份（`account/settings.json`：{v, keys: {项: {v, at}}}）：每项各记最后改的时刻（本机记在 settings.json 的 settings_at），新的为准。
 /// 本机设过、没记时刻的（同步设置以前的版本存的）：账号上已经有就听账号的，没有就推上去。返回（本机改了没有，要推上去的整份）

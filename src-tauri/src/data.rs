@@ -1470,7 +1470,7 @@ pub fn save_rules(rules: Value) -> Result<(), String> {
 pub fn get_settings() -> Value {
     let s = read_settings_raw();
     let get = |k: &str, d: &str| s.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
-    json!({
+    let mut out = json!({
         "gateway": get("gateway", beayy_core::DEFAULT_GATEWAY),
         "model_segment": get("summary_model", beayy_core::DEFAULT_MODEL),
         "model_daily": get("daily_model", &get("summary_model", beayy_core::DEFAULT_MODEL)),
@@ -1513,25 +1513,30 @@ pub fn get_settings() -> Value {
         "games_steam": s.get("games_steam").and_then(Value::as_bool).unwrap_or(true),
         // 设置 → 通用 → 关于：新版本下好了弹窗提醒，默认开；关了只在头像上挂点
         "update_prompt": s.get("update_prompt").and_then(Value::as_bool).unwrap_or(true),
-        // 设置 → AI：摘要关注点（10 分钟和小时摘要多留什么）、总结写法（日周月总结怎么写），空＝默认
-        "summary_focus": get("summary_focus", ""),
-        "summary_style": get("summary_style", ""),
-        // 自定义段：{title: 栏目名, ask: 这一栏写什么}，没起名＝不要
-        "summary_focus_section": s.get("summary_focus_section").cloned().unwrap_or(json!({"title": "", "ask": ""})),
-        "summary_style_section": s.get("summary_style_section").cloned().unwrap_or(json!({"title": "", "ask": ""})),
         // 棒喝的力度：off／low／medium／high／max／ultra，日总结、周总结多写一段狠话，默认 off（0.2.46 存的 true 算 medium）
         "roast": match s.get("roast") {
             Some(Value::Bool(true)) => "medium",
             Some(Value::String(k)) if ["low", "medium", "high", "max", "ultra"].contains(&k.as_str()) => k.as_str(),
             _ => "off",
         },
-    })
+    });
+    // 设置 → AI 的摘要关注点（10 分钟和小时摘要多留什么）、总结写法（日周月总结怎么写），空＝默认；
+    // _section 是单独一栏 {title: 栏目名, ask: 这一栏写什么}，没起名＝不要；
+    // _pick 是选的哪个模板（网页记的：空＝默认，b:名字＝内置的，u:编号＝自己建的），_templates 是自己建的 [{id, name, text, title, ask}]，
+    // 真正用的是前两样，选模板时网页把内容抄过去。放在 json! 外面：键再多宏展开会超层数
+    for k in ["summary_focus", "summary_style"] {
+        out[k] = json!(get(k, ""));
+        out[format!("{k}_section")] = s.get(&format!("{k}_section")).cloned().unwrap_or(json!({"title": "", "ask": ""}));
+        out[format!("{k}_pick")] = json!(get(&format!("{k}_pick"), ""));
+        out[format!("{k}_templates")] = s.get(&format!("{k}_templates")).cloned().unwrap_or(json!([]));
+    }
+    out
 }
 
 #[cfg_attr(not(beayy_mobile), tauri::command)]
 pub fn save_settings(settings: Value) -> Result<(), String> {
     let mut s = read_settings_raw();
-    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam"), ("update_prompt", "update_prompt"), ("summary_focus", "summary_focus"), ("summary_style", "summary_style"), ("summary_focus_section", "summary_focus_section"), ("summary_style_section", "summary_style_section")];
+    let map = [("gateway", "gateway"), ("model_segment", "summary_model"), ("model_daily", "daily_model"), ("repo_path", "repo_path"), ("blocklist", "blacklist"), ("onboarded", "onboarded"), ("relay_server", "relay_server"), ("sync_server", "sync_server"), ("transcribe_server", "transcribe_server"), ("speaker_name", "speaker_name"), ("model_mode", "model_mode"), ("map_mode", "map_mode"), ("sync_mode", "sync_mode"), ("sync_folder", "sync_folder"), ("map_provider", "map_provider"), ("summary_language", "summary_language"), ("ui_lang", "ui_lang"), ("roast", "roast"), ("summary_minutes", "summary_minutes"), ("games", "games"), ("games_lol", "games_lol"), ("games_steam", "games_steam"), ("update_prompt", "update_prompt"), ("summary_focus", "summary_focus"), ("summary_style", "summary_style"), ("summary_focus_section", "summary_focus_section"), ("summary_style_section", "summary_style_section"), ("summary_focus_pick", "summary_focus_pick"), ("summary_style_pick", "summary_style_pick"), ("summary_focus_templates", "summary_focus_templates"), ("summary_style_templates", "summary_style_templates")];
     let now = Utc::now().timestamp_millis();
     let mut at = s.get("settings_at").and_then(Value::as_object).cloned().unwrap_or_default();
     for (from, to) in map {

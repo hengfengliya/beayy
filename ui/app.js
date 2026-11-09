@@ -3762,12 +3762,28 @@ const TUNE = {
 };
 /** 要求和自定义段跟某个模板一样没有（中英文两种写法都认） */
 const tplIs = (x, text, title) => (tr(x.text) === text || x.text === text) && (tr(x.title) === title || x.title === title);
-/** 现在用的是哪个：默认／某个模板／自定义 */
-function tuneDesc(kind) {
-  const T = TUNE[kind], cf = S.settings || {}, text = (cf[T.key] || "").trim(), title = ((cf[T.key + "_section"] || {}).title || "").trim();
-  if (!text && !title) return tr("默认");
+/** 模板清单：默认、内置的（只读）、自己建的。key：空＝默认，b:名字＝内置，u:编号＝自己建的；内置的内容按界面语言给 */
+function tuneList(kind, mine) {
+  const T = TUNE[kind];
+  return [{ key: "", fixed: true, name: tr("默认"), text: "", title: "", ask: "" },
+    ...T.tpls.map((x) => ({ key: "b:" + x.name, fixed: true, name: tr(x.name), text: tr(x.text), title: x.title ? tr(x.title) : "", ask: x.ask ? tr(x.ask) : "" })),
+    ...mine.map((x) => ({ ...x, key: "u:" + x.id }))];
+}
+/** 现在在用哪个：记着的选择；0.2.63 存的没有选择，按内容认内置的，认不出算「自定义」 */
+function tunePick(kind) {
+  const T = TUNE[kind], cf = S.settings || {}, mine = cf[T.key + "_templates"] || [];
+  const text = (cf[T.key] || "").trim(), title = ((cf[T.key + "_section"] || {}).title || "").trim();
+  const pick = cf[T.key + "_pick"] || "";
+  if (pick && tuneList(kind, mine).some((x) => x.key === pick)) return pick;
+  if (!text && !title) return "";
   const hit = T.tpls.find((x) => tplIs(x, text, title));
-  return hit ? tr(hit.name) : tr("自定义");
+  return hit ? "b:" + hit.name : null;
+}
+function tuneDesc(kind) {
+  const T = TUNE[kind], pick = tunePick(kind);
+  if (pick === null) return tr("自定义");
+  const x = tuneList(kind, (S.settings || {})[T.key + "_templates"] || []).find((y) => y.key === pick);
+  return x ? x.name : tr("默认");
 }
 /** 预览里的一份摘要：标题、概括、涉及、经过（和时间线展开后一样） */
 const tuneSeg = (s) => `<p class="tn-title">${esc(s.title || tr("（没有标题）"))}</p>${s.description ? `<p class="tn-desc">${esc(s.description)}</p>` : ""}`
@@ -3783,61 +3799,105 @@ function tuneSum(text) {
     + (rm && rm.body ? remarkHtml(rm.body) : "") + story(parts.filter((p) => p !== one && p !== rm && p.body));
 }
 function tuneDialog(kind) {
-  const T = TUNE[kind], cur = S.settings[T.key] || "", sec = S.settings[T.key + "_section"] || {};
-  const tpls = [{ name: "", text: "", title: "", ask: "" }, ...T.tpls];
-  const body = `<div class="mx-seg" role="tablist" id="tn-tpl">${tpls.map((x, i) => `<button role="tab" data-i="${i}">${i ? esc(tr(x.name)) : tr("默认")}</button>`).join("")}</div>
-    <textarea class="mx-input dlg-ta tn-ta" id="tn-text" placeholder="${esc(tr(T.ph))}" aria-label="${esc(tr(T.title))}">${esc(cur)}</textarea>
-    <div class="mx-field"><label for="tn-sec-title">${tr("单独一栏")}</label><div class="tn-sec">
-      <input class="mx-input" id="tn-sec-title" maxlength="20" placeholder="${esc(tr("栏目名，比如「想法」"))}" value="${esc(sec.title || "")}">
-      <input class="mx-input" id="tn-sec-ask" placeholder="${esc(tr("这一栏写什么"))}" aria-label="${esc(tr("这一栏写什么"))}" value="${esc(sec.ask || "")}"></div></div>
-    <div class="tn-acts"><button class="mx-btn mx-btn--secondary mx-btn--sm" id="tn-ai">${tr("AI 改写")}</button><button class="mx-btn mx-btn--secondary mx-btn--sm" id="tn-pre">${tr("预览")}</button><span class="note" id="tn-state"></span></div>
-    <p class="note">${tr(T.note)}</p>
-    <div class="tn-out" id="tn-out" hidden></div>`;
+  const T = TUNE[kind], cf = S.settings;
+  const mine = JSON.parse(JSON.stringify(cf[T.key + "_templates"] || []));
+  const newId = () => Date.now().toString(36);
+  let pick = tunePick(kind);
+  // 0.2.63 存的自己写的内容：变成「我的模板」里的一个
+  if (pick === null) {
+    const sec = cf[T.key + "_section"] || {};
+    const x = { id: newId(), name: tr("自定义"), text: cf[T.key] || "", title: sec.title || "", ask: sec.ask || "" };
+    mine.push(x); pick = "u:" + x.id;
+  }
+  const inUse = pick;
+  let sel = pick, deleting = false;
+  const list = () => tuneList(kind, mine);
+  const cur = () => list().find((x) => x.key === sel) || list()[0];
+  const body = `<div class="tn-wrap"><div class="tn-list" id="tn-list"></div><div class="tn-main" id="tn-main"></div></div>
+    <p class="note">${tr(T.note)}</p><div class="tn-out" id="tn-out" hidden></div>`;
   openDialog({
-    title: tr(T.title), body, ok: tr("保存"), wide: true,
-    submit: async (el) => {
-      const v = (id) => el.querySelector("#" + id).value.trim();
-      await saveSome({ [T.key]: v("tn-text"), [T.key + "_section"]: { title: v("tn-sec-title"), ask: v("tn-sec-title") ? v("tn-sec-ask") : "" } });
+    title: tr(T.title), body, ok: tr("保存并使用"), wide: true,
+    submit: async () => {
+      mine.forEach((x, i) => { x.name = (x.name || "").trim() || tr("我的模板 {n}", { n: i + 1 }); x.text = (x.text || "").trim(); x.title = (x.title || "").trim(); x.ask = x.title ? (x.ask || "").trim() : ""; });
+      const x = cur();
+      await saveSome({ [T.key + "_templates"]: mine, [T.key + "_pick"]: x.key, [T.key]: x.text, [T.key + "_section"]: { title: x.title, ask: x.ask } });
       renderSettings();
     },
     onOpen: (el, d) => {
-      const $ = (id) => el.querySelector("#" + id), ta = $("tn-text"), st = $("tn-sec-title"), sa = $("tn-sec-ask");
-      const section = () => ({ title: st.value.trim(), ask: sa.value.trim() });
-      const mark = () => {
-        const v = ta.value.trim(), t = st.value.trim();
-        el.querySelectorAll("#tn-tpl button").forEach((b) => { const x = tpls[+b.dataset.i]; const on = x.name ? tplIs(x, v, t) : !v && !t; b.classList.toggle("is-on", on); b.setAttribute("aria-selected", on); });
+      const $ = (id) => el.querySelector("#" + id);
+      const row = (x) => `<button class="tn-item${x.key === sel ? " is-on" : ""}" role="option" aria-selected="${x.key === sel}" data-k="${esc(x.key)}"><span>${esc(x.name)}</span>${x.key === inUse ? `<span class="tn-use">${tr("在用")}</span>` : ""}</button>`;
+      const drawList = () => {
+        const all = list();
+        $("tn-list").innerHTML = `<p class="tn-group">${tr("内置")}</p>${all.filter((x) => x.fixed).map(row).join("")}
+          <p class="tn-group">${tr("我的模板")}</p>${all.filter((x) => !x.fixed).map(row).join("")}
+          <button class="tn-item tn-new" id="tn-new"><span>+ ${tr("新建模板")}</span></button>`;
       };
-      mark();
-      ta.oninput = st.oninput = mark;
-      $("tn-tpl").onclick = (e) => {
-        const b = e.target.closest("[data-i]"); if (!b) return;
-        const x = tpls[+b.dataset.i];
-        ta.value = x.text ? tr(x.text) : ""; st.value = x.title ? tr(x.title) : ""; sa.value = x.ask ? tr(x.ask) : "";
-        mark();
+      const btn = (id, text, cls = "secondary") => `<button class="mx-btn mx-btn--${cls} mx-btn--sm" id="${id}">${text}</button>`;
+      const drawMain = () => {
+        const x = cur();
+        let html;
+        if (x.fixed) {
+          html = !x.key ? `<p class="tn-name">${esc(x.name)}</p><p class="note">${tr("不加要求，照 Beayy 原来的写法。")}</p>`
+            : `<p class="tn-name">${esc(x.name)}</p>${md(x.text)}`
+              + (x.title ? `<p class="more-k">${tr("单独一栏")}</p><p class="tn-desc"><b>${esc(x.title)}</b>　${esc(x.ask)}</p>` : "")
+              + `<div class="tn-acts">${btn("tn-pre", tr("预览"))}${btn("tn-copy", tr("复制成我的模板"))}<span class="note" id="tn-state"></span></div>`;
+        } else {
+          html = `<input class="mx-input tn-name-in" id="tn-name" maxlength="20" value="${esc(x.name)}" aria-label="${tr("模板名")}" placeholder="${esc(tr("模板名"))}">
+            <textarea class="mx-input dlg-ta tn-ta" id="tn-text" placeholder="${esc(tr(T.ph))}" aria-label="${esc(tr(T.title))}">${esc(x.text)}</textarea>
+            <div class="mx-field"><label for="tn-sec-title">${tr("单独一栏")}</label><div class="tn-sec">
+              <input class="mx-input" id="tn-sec-title" maxlength="20" placeholder="${esc(tr("栏目名，比如「想法」"))}" value="${esc(x.title)}">
+              <input class="mx-input" id="tn-sec-ask" placeholder="${esc(tr("这一栏写什么"))}" aria-label="${esc(tr("这一栏写什么"))}" value="${esc(x.ask)}"></div></div>
+            ${deleting ? `<div class="mx-confirm"><div class="mx-confirm-text"><b>${tr("删除这个模板？")}</b></div>${btn("tn-del-no", tr("取消"))}${btn("tn-del-yes", tr("删除"), "danger")}</div>`
+              : `<div class="tn-acts">${btn("tn-ai", tr("AI 改写"))}${btn("tn-pre", tr("预览"))}<span class="note" id="tn-state"></span><span class="tn-gap"></span>${btn("tn-del", tr("删除"), "text")}</div>`}`;
+        }
+        $("tn-main").innerHTML = html;
+        bindMain();
+      };
+      const draw = () => { drawList(); drawMain(); };
+      const go = (key) => { sel = key; deleting = false; $("tn-out").hidden = true; draw(); };
+      $("tn-list").onclick = (e) => {
+        if (e.target.closest("#tn-new")) { const x = { id: newId(), name: tr("我的模板 {n}", { n: mine.length + 1 }), text: "", title: "", ask: "" }; mine.push(x); go("u:" + x.id); $("tn-name").select(); return; }
+        const b = e.target.closest("[data-k]"); if (b) go(b.dataset.k);
       };
       // 两个按钮都要等模型：等的时候都不能点，旁边写在做什么
       const busy = async (label, f) => {
-        $("tn-ai").disabled = $("tn-pre").disabled = true; $("tn-state").textContent = label; d.setErr(null);
+        const bs = ["tn-ai", "tn-pre"].map($).filter(Boolean);
+        bs.forEach((b) => (b.disabled = true)); $("tn-state").textContent = label; d.setErr(null);
         try { await f(); } catch (x) { if (DLG === d) d.setErr(trMsg(String(x && x.message ? x.message : x))); }
         if (DLG !== d) return;
-        $("tn-ai").disabled = $("tn-pre").disabled = false; $("tn-state").textContent = "";
+        bs.forEach((b) => (b.disabled = false)); if ($("tn-state")) $("tn-state").textContent = "";
       };
-      $("tn-ai").onclick = () => busy(tr("在改写…"), async () => {
-        const out = await call("ai_write_note", { kind, wish: ta.value });
-        if (DLG !== d) return;
-        ta.value = out.text;
-        if (out.title) { st.value = out.title; sa.value = out.ask; }
-        mark();
-      });
-      $("tn-pre").onclick = () => busy(tr("在用你的记录试写…"), async () => {
-        const r = await call(T.cmd, { text: ta.value, section: section() });
-        if (DLG !== d) return;
-        const [a, b] = kind === "focus" ? [tuneSeg(r.before), tuneSeg(r.after)] : [tuneSum(r.before), tuneSum(r.after)];
-        const src = kind === "focus" ? tr("用 {t} 的记录", { t: `${hm(r.start)}–${hm(r.end)}` }) : tr("用 {d} 的记录", { d: r.date.slice(5) });
-        const out = $("tn-out");
-        out.hidden = false;
-        out.innerHTML = `<p class="note">${src}</p><div class="tn-cols"><div><p class="more-k">${tr("现在")}</p>${a}</div><div><p class="more-k">${tr("改后")}</p>${b}</div></div>`;
-      });
+      const bindMain = () => {
+        const x = cur(), on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
+        if (!x.fixed) {
+          const m = mine.find((y) => "u:" + y.id === x.key);
+          const sync = () => { m.name = $("tn-name").value; m.text = $("tn-text").value; m.title = $("tn-sec-title").value; m.ask = $("tn-sec-ask").value; };
+          ["tn-name", "tn-text", "tn-sec-title", "tn-sec-ask"].forEach((id) => ($(id).oninput = sync));
+          $("tn-name").onchange = drawList;
+          on("tn-del", () => { deleting = true; drawMain(); });
+          on("tn-del-no", () => { deleting = false; drawMain(); });
+          on("tn-del-yes", () => { mine.splice(mine.indexOf(m), 1); go(inUse === x.key ? "" : inUse); });
+          on("tn-ai", () => busy(tr("在改写…"), async () => {
+            const out = await call("ai_write_note", { kind, wish: m.text });
+            if (DLG !== d || cur() !== x) return;
+            m.text = out.text;
+            if (out.title) { m.title = out.title; m.ask = out.ask; }
+            drawMain();
+          }));
+        }
+        on("tn-copy", () => { const y = { id: newId(), name: tr("{name}（我的）", { name: x.name }), text: x.text, title: x.title, ask: x.ask }; mine.push(y); go("u:" + y.id); });
+        on("tn-pre", () => busy(tr("在用你的记录试写…"), async () => {
+          const c = cur();
+          const r = await call(T.cmd, { text: c.text, section: { title: c.title, ask: c.ask } });
+          if (DLG !== d || cur().key !== c.key) return;
+          const [a, b] = kind === "focus" ? [tuneSeg(r.before), tuneSeg(r.after)] : [tuneSum(r.before), tuneSum(r.after)];
+          const src = kind === "focus" ? tr("用 {t} 的记录", { t: `${hm(r.start)}–${hm(r.end)}` }) : tr("用 {d} 的记录", { d: r.date.slice(5) });
+          const out = $("tn-out");
+          out.hidden = false;
+          out.innerHTML = `<p class="note">${src}</p><div class="tn-cols"><div><p class="more-k">${tr("现在")}</p>${a}</div><div><p class="more-k">${tr("改后")}</p>${b}</div></div>`;
+        }));
+      };
+      draw();
     },
   });
 }

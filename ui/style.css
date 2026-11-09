@@ -691,6 +691,23 @@ a.mx-btn { text-decoration: none; }
 .tn-ta { min-height: 120px; }
 .tn-acts { display: flex; align-items: center; gap: var(--space-2); }
 .tn-sec { display: grid; grid-template-columns: 180px 1fr; gap: var(--space-2); }
+/* 模板：左边一列清单（内置／我的／新建），右边内容；内置的只读 */
+.tn-wrap { display: grid; grid-template-columns: 200px 1fr; gap: var(--space-6); min-height: 280px; }
+.tn-list { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; }
+.tn-group { margin: var(--space-3) 0 var(--space-1); padding: 0 8px; font-size: 12px; line-height: 17px; color: var(--ink-4); }
+.tn-group:first-child { margin-top: 0; }
+.tn-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-md); padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: 14px/20px var(--font-sans); text-align: left; cursor: pointer; }
+.tn-item > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tn-item:hover { background: var(--hover); }
+.tn-item.is-on { background: var(--hover); font-weight: 600; }
+.tn-use { font-size: 12px; font-weight: 400; color: var(--ink-4); }
+.tn-new { margin-top: var(--space-2); color: var(--ink-3); }
+.tn-main { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.tn-main > .md { color: var(--ink-2); }
+.tn-name { margin: 0; font-weight: 600; }
+.tn-main > .more-k { margin: var(--space-2) 0 calc(-1 * var(--space-2)); font-size: 12px; line-height: 17px; color: var(--ink-4); }
+.tn-main > .tn-desc { margin: 0; }
+.tn-gap { flex: 1; }
 .tn-out { border-top: 1px solid var(--line); padding-top: var(--space-4); }
 .tn-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); margin-top: var(--space-3); }
 .tn-cols > div { min-width: 0; }
