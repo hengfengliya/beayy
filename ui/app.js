@@ -746,7 +746,7 @@ function placeTotalsDays(days) {
   if (none) rows.push({ n: tr("没记到"), sec: none, c: "none" });
   const max = Math.max(...rows.map((r) => r.sec), 1), all = rows.reduce((a, r) => a + r.sec, 0) || 1;
   const pct = (sec) => { const p = (sec / all) * 100; return p < 1 ? "<1%" : Math.round(p) + "%"; };
-  const bars = `<div class="bars pl-bars">${rows.map((r) => `<div class="bar-row"><span class="bar-name${r.c === "pl" && !r.other ? "" : " dim"}" title="${esc(r.n)}">${esc(r.n)}</span><span class="bar"><i class="${r.c}" style="width:${Math.max(2, Math.round((r.sec / max) * 100))}%${r.tone ? `;background:var(--pl-${r.tone}-s)` : ""}"></i></span><span class="bar-v mono">${r.sec < 3600 ? Math.round(r.sec / 60) + "m" : hh(r.sec) + "h"}</span><span class="bar-p mono">${pct(r.sec)}</span></div>`).join("")}</div>`;
+  const bars = `<div class="bars pl-bars">${rows.map((r) => `<div class="bar-row"><span class="bar-name${r.c === "pl" && !r.other ? "" : " dim"}" title="${esc(r.n)}">${esc(r.n)}</span><span class="bar"><i class="${r.c}" style="--f:${(r.sec / max).toFixed(3)}${r.tone ? `;background:var(--pl-${r.tone}-s)` : ""}"></i><span class="bar-v mono">${r.sec < 3600 ? Math.round(r.sec / 60) + "m" : hh(r.sec) + "h"}</span><span class="bar-p mono">${pct(r.sec)}</span></span></div>`).join("")}</div>`;
   return section(tr("地点"), bars);
 }
 
@@ -1102,14 +1102,15 @@ function markNav(page) {
 
 /** 「今天」页页签那一行右边的翻日期：一个整体「‹ 日期 ▾ ›」（点日期展开，只列有数据的日子，同总结页）；
  *  看以前的日子时左边多一个「今天」，同样高度 */
-function dayPicker(date, past) {
+/** bare＝中间只画日历图标、不写日期：今天页的大标题已经是这一天，免得同一个日期上下写两遍 */
+function dayPicker(date, past, bare = false) {
   const now = localDay();
   const dates = [...new Set([now, ...S.days.map((x) => x.date)])].sort().reverse();
   const i = dates.indexOf(date), prev = dates[i + 1], next = i > 0 ? dates[i - 1] : null;
   return `${past ? `<button class="mx-btn mx-btn--secondary dn-today" data-day="${now}">${tr("今天")}</button>` : ""}
     <div class="daynav pick">
       <button class="dn-step" aria-label="${tr("前一天")}" title="${tr("前一天")}" ${prev ? `data-day="${prev}"` : "disabled"}>${ICON.chevL}</button>
-      <button class="dn-date" id="day-pick" aria-haspopup="menu" aria-expanded="false">${short(date)}${ICON.chevD}</button>
+      <button class="dn-date" id="day-pick" aria-haspopup="menu" aria-expanded="false"${bare ? ` aria-label="${tr("换一天")}" title="${tr("换一天")}"` : ""}>${bare ? lu('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>') : short(date)}${ICON.chevD}</button>
       <button class="dn-step" aria-label="${tr("后一天")}" title="${tr("后一天")}" ${next ? `data-day="${next}"` : "disabled"}>${ICON.chevR}</button>
       <div class="mx-menu" role="menu" hidden>${dates.map((x) => `<button role="menuitemradio" aria-checked="${x === date}" data-day="${x}">${x === now ? tr("今天") : short(x)}${x === date ? `<span class="mx-check">${ICON.check}</span>` : ""}</button>`).join("")}</div></div>`;
 }
@@ -1153,7 +1154,7 @@ async function renderToday() {
   const toolbar = `<div class="toolbar"><div class="toolbar-left"><div class="tabs" role="tablist" id="view-tabs">${[["overview", tr("全面")], ["timeline", tr("时间线")], ["places", tr("地点")]].map(([k, v]) =>
       `<button role="tab" aria-selected="${k === view}" class="${k === view ? "is-on" : ""}" data-view="${k}">${v}</button>`).join("")}</div>
       ${view === "timeline" ? `<span class="tb-sep"></span>${seg}` : ""}${view === "places" ? `<span class="tb-sep"></span>${pseg}` : ""}</div>
-    <div class="toolbar-right">${ph && !past ? (phoneStale ? `<span class="note tb-note" title="${esc(phoneLag)}">${android ? tr("手机停在 {t}", { t: hm(ph.synced_until) }) : tr("手机停在 {t}，在等苹果传来", { t: hm(ph.synced_until) })}</span>` : `<span class="note tb-note">${tr("同步至 {t}", { t: ymdhm(ph.synced_until) })}</span>`) : ""}${view === "places" && pview === "often" ? "" : dayPicker(today, past)}</div></div>`;
+    <div class="toolbar-right">${ph && !past ? (phoneStale ? `<span class="note tb-note" title="${esc(phoneLag)}">${android ? tr("手机停在 {t}", { t: hm(ph.synced_until) }) : tr("手机停在 {t}，在等苹果传来", { t: hm(ph.synced_until) })}</span>` : `<span class="note tb-note">${tr("同步至 {t}", { t: ymdhm(ph.synced_until) })}</span>`) : ""}${view === "places" && pview === "often" ? "" : dayPicker(today, past, true)}</div></div>`;
   const overview = `<div class="readouts">
         ${readout(tr("在电脑前"), hh(c.active_sec), "h", c.first ? `${c.first}–${c.last}` : tr("还没有记录"))}
         ${readout(tr("手机"), ph || fda !== false ? hh(ph ? ph.total_sec : (pack.phone || {}).total_sec) : "—", "h", phoneCap)}
@@ -1256,7 +1257,7 @@ function workSection(w) {
     const max = Math.max(...rows.map((r) => r.sec), 1), total = rows.reduce((a, r) => a + r.sec, 0) || 1;
     const pct = (sec) => { const p = (sec / total) * 100; return p < 1 ? "<1%" : Math.round(p) + "%"; };
     // 类型、领域是固定的几个词（beayy-summary 的 ACTIVITY_TREE、DOMAINS），显示时查译文；项目名查不到，原样
-    const cells = (r) => `<span class="bar-name${r.dim ? " dim" : ""}" title="${esc(tr(r.name))}">${esc(tr(r.name))}</span><span class="bar"><i style="width:${Math.max(2, Math.round((r.sec / max) * 100))}%"></i></span><span class="bar-v mono">${dur(r.sec)}</span><span class="bar-p mono">${pct(r.sec)}</span>`;
+    const cells = (r) => `<span class="bar-name${r.dim ? " dim" : ""}" title="${esc(tr(r.name))}">${esc(tr(r.name))}</span><span class="bar"><i style="--f:${(r.sec / max).toFixed(3)}"></i><span class="bar-v mono">${dur(r.sec)}</span><span class="bar-p mono">${pct(r.sec)}</span></span>`;
     return `<div class="bars">${rows.map((r) => {
       const kids = r.children.length > 1 || (r.children[0] && r.children[0].name !== r.name) ? r.children.slice(0, kind === "projects" ? undefined : 6) : [];
       if (!kids.length) return `<div class="bar-row">${cells(r)}</div>`;
@@ -1292,7 +1293,7 @@ function appsSection(apps) {
   if (!xs.length) return "";
   const max = xs[0].sec, total = xs.reduce((a, x) => a + x.sec, 0);
   const dur = (sec) => (sec < 3600 ? Math.round(sec / 60) + "m" : hh(sec) + "h");
-  return section(tr("时间"), `<div class="bars">${xs.map((a) => `<div class="bar-row"><span class="bar-name" title="${esc(a.name)}">${esc(a.name)}</span><span class="bar"><i style="width:${Math.max(2, Math.round((a.sec / max) * 100))}%"></i></span><span class="bar-v mono">${dur(a.sec)}</span><span class="bar-p mono">${Math.round((a.sec / total) * 100)}%</span></div>`).join("")}</div>`);
+  return section(tr("时间"), `<div class="bars">${xs.map((a) => `<div class="bar-row"><span class="bar-name" title="${esc(a.name)}">${esc(a.name)}</span><span class="bar"><i style="--f:${(a.sec / max).toFixed(3)}"></i><span class="bar-v mono">${dur(a.sec)}</span><span class="bar-p mono">${Math.round((a.sec / total) * 100)}%</span></span></div>`).join("")}</div>`);
 }
 
 // 展开／收起一级：直接改这一块，不重画整页
@@ -1345,9 +1346,6 @@ function hourRows(d, items) {
     if (idle && !ph.length && !wt.length) { idleRun = idleRun ? [k, idleRun[1]] : [k, k]; continue; }
     flushIdle();
     const phSec = ph.reduce((a, x) => a + x.ses.sec, 0);
-    const phApps = {};
-    for (const x of ph) for (const a of x.ses.apps) phApps[a.name] = (phApps[a.name] || 0) + a.sec;
-    const topPh = Object.entries(phApps).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n).join(tr("、"));
     let latest = comp[0] && comp[0].seg;
     if (!r && comp.length && comp.every((x) => x.seg.source === "raw")) {
       const sum = {};
@@ -1374,10 +1372,12 @@ function hourRows(d, items) {
     const pNames = Object.fromEntries(ph.flatMap((x) => x.ses.apps.map((a) => [a.bundle_id, a.name])));
     const pApps = [...new Set([...ph].reverse().flatMap((x) => x.ses.apps.map((a) => a.bundle_id)))];
     const cIco = icons(cApps, false), pIco = icons(pApps, true, pNames);
-    const appsLine = cIco || pIco ? `<div class="hour-apps">${cIco ? `<span class="lbl">${tr("电脑")}</span>${cIco}` : ""}${pIco ? `<span class="lbl">${tr("手机")}</span>${pIco}` : ""}</div>` : "";
+    // 手机用了多久写在图标前面（app 名在图标的悬停里，不再用文字重写一遍）；这一小时只有手机时不写「不在电脑前」，这一行就是标题
+    const bare = title === "不在电脑前" && phSec > 0 && !wt.length;
+    const appsLine = cIco || pIco || phSec ? `<div class="hour-apps${bare ? " bare" : ""}">${cIco ? `<span class="lbl">${tr("电脑")}</span>${cIco}` : ""}${pIco || phSec ? `<span class="lbl">${phSec ? tr("手机 {d}", { d: minText(phSec) }) : tr("手机")}</span>${pIco}` : ""}</div>` : "";
     out.push(`<details class="tl-row hour" data-h="${new Date(k).getHours()}"><summary><span class="t">${hm(new Date(k).toISOString())}–${hm(new Date(k + 3600e3).toISOString())}${where ? `<div class="where" title="${esc(where)}">${esc(where)}</div>` : ""}</span><span>
-        <span class="name${title === "不在电脑前" ? " dim" : ""}">${esc(title === "不在电脑前" ? tr(title) : title)}</span>${desc ? `<div class="desc">${esc(desc)}</div>` : ""}
-        ${chips ? `<div class="chips">${chips}</div>` : ""}${appsLine}${phSec ? `<div class="ph-line">${tr("手机 {d}", { d: minText(phSec) })}${topPh ? ` · ${esc(topPh)}` : ""}</div>` : ""}${wt.length ? `<div class="ph-line">${tr("对话 {d}", { d: talkText(talkSec) })} · ${esc(who.slice(0, 3).join(tr("、")))}${who.length > 3 ? ` ${tr("等 {n} 人", { n: who.length })}` : ""}</div>` : ""}</span>
+        ${bare ? "" : `<span class="name${title === "不在电脑前" ? " dim" : ""}">${esc(title === "不在电脑前" ? tr(title) : title)}</span>`}${desc ? `<div class="desc">${esc(desc)}</div>` : ""}
+        ${chips ? `<div class="chips">${chips}</div>` : ""}${appsLine}${wt.length ? `<div class="ph-line">${tr("对话 {d}", { d: talkText(talkSec) })} · ${esc(who.slice(0, 3).join(tr("、")))}${who.length > 3 ? ` ${tr("等 {n} 人", { n: who.length })}` : ""}</div>` : ""}</span>
         ${inner ? `<span class="chev">${ICON.chevR}</span>` : "<span></span>"}</summary>${inner ? `<div class="hour-in">${inner}</div>` : ""}</details>`);
   }
   flushIdle();
@@ -1717,8 +1717,7 @@ const canWrite = () => !(S.status && S.status.mobile);
 /** 总结末尾一行：口径说明（由 Beayy 用……生成，数据截至……）＋「重新生成」 */
 const sumFoot = (note, id) => `<p class="note sum-foot">${esc(trMsg(note || ""))}${canWrite() ? `<button class="mx-btn mx-btn--text mx-btn--sm" id="${id}">${tr("重新生成")}</button>` : ""}</p>`;
 /** 还没有总结：一句说明＋「现在生成」（手机上只有说明）。说明写清会自动写，按钮只是不想等时用，免得读成两件事 */
-const sumEmpty = (title, text, id, err) => section(title, emptyBlock("notebook", canWrite() ? tr("{text}，也可以现在生成", { text }) : tr("总结在电脑上写，写好会同步过来"),
-  canWrite() ? `<button class="mx-btn mx-btn--secondary" id="${id}">${tr("现在生成")}</button>` : "") + (err ? `<div class="mx-field-error">${esc(err)}</div>` : ""));
+const sumEmpty = (title, text, id, err) => section(title, `<div class="sum-empty"><span>${esc(canWrite() ? tr("{text}，也可以现在生成", { text }) : tr("总结在电脑上写，写好会同步过来"))}</span>${canWrite() ? `<button class="mx-btn mx-btn--secondary mx-btn--sm" id="${id}">${tr("现在生成")}</button>` : ""}</div>` + (err ? `<div class="mx-field-error">${esc(err)}</div>` : ""));
 /** 一句话（蜡笔横线）＋点评 */
 const sumLead = (sum, lineTitle) => {
   const one = sum.parts.find((p) => p.title === lineTitle), rm = sum.parts.find((p) => p.title === "点评");
@@ -2128,8 +2127,7 @@ function overviewBody(ov) {
       ${readout(tr("支出"), yuanRound(t.out), tr("元"), yuan(t.out), false, [...ov.by_ttype.filter((x) => x.out).map((x) => `${tr(x.name)} ${yuan(x.out)}`), t.refund ? tr("已扣退款 {v} 元", { v: yuan(t.refund) }) : ""].filter(Boolean).join("\n"))}
       ${readout(tr("消费"), yuanRound(t.consume), tr("元"), yuan(t.consume), false, p ? (ov.upto ? tr("前三个月同期平均 {v} 元", { v: yuan(p.consume) }) : tr("前三个月平均 {v} 元", { v: yuan(p.consume) })) : "")}
       ${readout(tr("收入"), yuanRound(t.in), tr("元"), yuan(t.in))}
-      ${readout(tr("结余"), (t.net < 0 ? "−" : "") + yuanRound(Math.abs(t.net)), tr("元"), yuan(t.net))}
-      ${readout(tr("储蓄率"), t.rate == null ? "—" : Math.round(t.rate * 100), "%", "", false, tr("结余 ÷ 收入"))}
+      ${readout(tr("结余"), (t.net < 0 ? "−" : "") + yuanRound(Math.abs(t.net)), tr("元"), yuan(t.net), false, t.rate == null ? "" : `${tr("储蓄率")} ${t.rate < 0 ? "−" : ""}${Math.abs(Math.round(t.rate * 100))}%（${tr("结余 ÷ 收入")}）`)}
     </div>`;
   const ins = ov.is_month ? section(tr("这个月的钱"), ov.insight
       ? `<div class="story bill-insight">${md(ov.insight)}</div><p class="sum-foot"><button class="mx-btn mx-btn--text mx-btn--sm" id="ins-gen">${MN.busy === "insight" ? tr("在写…") : tr("重新写")}</button></p>`
@@ -2806,11 +2804,11 @@ async function renderRules() {
   const budgets = rules.some((r) => /每月/.test(r.text)) && !(S.status && S.status.mobile)
     ? ((await call("money_overview", { month: localDay().slice(0, 7) }).catch(() => null)) || {}).budgets || [] : [];
   const verdict = (r) => {
-    if (r.enabled === false) return `<div class="verdict muted">${tr("暂不对照")}</div>`;
+    if (r.enabled === false) return "";
     const bg = budgets.find((b) => b.text === r.text);
     if (bg) return `<div class="verdict ${bg.ok ? "ok" : "over"}"><span>${tr("这个月已花")}</span><b>${yuan(bg.spent)} / ${yuan(bg.limit)}</b>${bg.ok ? ` · ${tr("守住了")}` : ` · ${tr("没守住")}`}</div>`;
     const c = checkRule(parseRule(r.text) || {}, today);
-    if (!c) return `<div class="verdict muted">${tr("这条算不出来，交给日总结对照")}</div>`;
+    if (!c) return "";
     return `<div class="verdict ${c.ok === null ? "muted" : c.ok ? "ok" : "over"}"><span>${esc(c.label)}</span>${c.value ? `<b>${esc(c.value)}</b>` : ""}${c.ok === null ? "" : c.ok ? ` · ${tr("守住了")}` : ` · ${tr("没守住")}`}</div>`;
   };
   const row = (r, i) => `<div class="rule${r.enabled === false ? " off" : ""}" data-id="${r.id}">

@@ -141,8 +141,8 @@ body { margin: 0; padding: 16px; }
 .mx-setting-desc { font-size: 13px; line-height: 17px; color: var(--ink-3); }
 .mx-switch { position: relative; width: 36px; height: 20px; flex: none; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--line-strong); cursor: pointer; }
 .mx-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--on-accent); box-shadow: var(--shadow-sm); transition: transform .2s cubic-bezier(.2,.7,.3,1); }
-.mx-switch[aria-checked="true"] { background: var(--focus); }
-.mx-switch[aria-checked="true"]::after { transform: translateX(16px); }
+.mx-switch[aria-checked="true"] { background: var(--primary); }
+.mx-switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--on-primary); }
 @media (prefers-reduced-motion: reduce) { .mx-switch::after { transition: none; } }
 
 /* 提示条、报错块、空状态、加载 */
